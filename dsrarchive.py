@@ -772,6 +772,25 @@ def clips(a):
     print(f"{fertig} Clips gespeichert.")
 
 
+def abdeckung(a):
+    """Zeigt für jeden Boss-Platz (5 Punkte), ob schon ein Kampf in der Datenbank dazu passt.
+    Ein Kampf zählt für jeden Platz, den seine Deutungen nennen (bei mehrdeutigen Namen für mehrere)."""
+    db = db_oeffnen(a.db)
+    plaetze = [r for r in json.load(open(a.namen, encoding="utf-8")) if r["pts"] >= 5]
+    zaehl = {r["key"]: [0, set()] for r in plaetze}
+    for kand, tid in db.execute("SELECT k.kandidaten, v.twitch_id FROM kaempfe k JOIN videos v ON v.id=k.video_id"):
+        for p in {c["platz"] for c in json.loads(kand)}:
+            if p in zaehl:
+                zaehl[p][0] += 1
+                zaehl[p][1].add(tid)
+    fehlt = 0
+    for r in plaetze:
+        n, v = zaehl[r["key"]][0], len(zaehl[r["key"]][1])
+        fehlt += n == 0
+        print(f"{'FEHLT' if n == 0 else 'ok   '}  {r['en']:<28} {r['area_de']:<28} {n} Kämpfe in {v} Videos   (dort steht: {r['rando_en']})")
+    print(f"\n{len(plaetze) - fehlt} von {len(plaetze)} Boss-Plätzen haben mindestens einen Kampf.")
+
+
 def bereinigen(a):
     """Entfernt Einträge von lokalen Test-Dateien (Quelle ist keine Twitch-Adresse). Sie würden sonst
     neben dem späteren Gesamtlauf desselben Videos doppelt erscheinen."""
@@ -824,6 +843,9 @@ def main():
     c.add_argument("--nur-planen", action="store_true", help="nur zeigen, was geladen würde")
     c.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
     c.set_defaults(f=clips)
+    ab = sub.add_parser("abdeckung", help="zeigen, welche Boss-Plätze schon in der Datenbank vorkommen")
+    ab.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
+    ab.set_defaults(f=abdeckung)
     b = sub.add_parser("bereinigen", help="Einträge von lokalen Test-Dateien entfernen")
     b.set_defaults(f=bereinigen)
     q = sub.add_parser("suche")
