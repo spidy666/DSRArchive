@@ -493,8 +493,10 @@ def scan(a):
     # Kämpfe desselben Namens, die sich nach der Startbestimmung berühren, sind ein Kampf
     kaempfe.sort(key=lambda k: k["start"])
     zusammen = []
+    # gleicher Platz zählt wie gleicher Name ("Bell Gargoyle" und "Bell Gargoyles")
+    sig = lambda k: frozenset((c["deutung"], c["platz"]) for c in k["kandidaten"])
     for k in kaempfe:
-        m = next((x for x in reversed(zusammen) if x["key"] == k["key"]), None)
+        m = next((x for x in reversed(zusammen) if x["key"] == k["key"] or sig(x) == sig(k)), None)
         if m and k["start"] - m["ende"] <= a.luecke:
             m["ende"] = max(m["ende"], k["ende"])
             m["treffer"] += k["treffer"]
