@@ -12,7 +12,7 @@ Befehle:
 Voraussetzungen: Python 3, Pillow (pip install pillow), ffmpeg + ffprobe und tesseract
 im PATH (für deutschen Spieltext die Sprachdatei deu), für Adressen zusätzlich yt-dlp.
 """
-import argparse, difflib, json, os, re, sqlite3, subprocess, sys, tempfile, time, unicodedata
+import argparse, difflib, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
 from datetime import datetime
 
 from PIL import Image, ImageFilter
@@ -734,6 +734,7 @@ def clips(a):
                             f"{dateiname(streamer)} - {dateiname(boss)} - {tid} - {hms(max(0, sek)).replace(':', '-')}.mp4")
         if not os.path.exists(pfad):
             geplant.append((quelle, streamer, tid, boss, key, start, ende, pfad))
+    geplant.sort(key=lambda g: (int(g[2]) if str(g[2]).isdigit() else 0, g[5]))   # älteste Videos zuerst (Twitch löscht die zuerst)
     print(f"{len(zeilen)} Kämpfe in der Datenbank, {len(geplant)} noch ohne Clip.")
     if a.nur_planen:
         for g in geplant[:a.max or None]:
@@ -743,6 +744,11 @@ def clips(a):
     fertig = 0
     for quelle, streamer, tid, boss, key, start, ende, pfad in geplant:
         if a.max and fertig >= a.max:
+            break
+        os.makedirs(a.ziel, exist_ok=True)
+        frei = shutil.disk_usage(a.ziel).free / 1e9
+        if frei < a.min_frei:
+            print(f"Nur noch {frei:.1f} GB frei auf dem Ziellaufwerk (Grenze {a.min_frei} GB), Lauf beendet.")
             break
         try:
             if quelle not in quellen:
@@ -814,6 +820,7 @@ def main():
     c.add_argument("--streamer", help="nur Kämpfe dieses Streamers")
     c.add_argument("--boss", help="nur Kämpfe mit diesem Namen an der Leiste")
     c.add_argument("--max", type=int, default=0, help="höchstens so viele Clips in diesem Lauf (zum Testen)")
+    c.add_argument("--min-frei", type=float, default=5, help="Lauf beenden, wenn auf dem Ziellaufwerk weniger GB frei sind")
     c.add_argument("--nur-planen", action="store_true", help="nur zeigen, was geladen würde")
     c.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
     c.set_defaults(f=clips)
