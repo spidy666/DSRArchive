@@ -25,6 +25,7 @@ python dsrarchive.py export
 - `--versatz 12600`: Sekunde im Gesamtvideo, bei der ein heruntergeladener Ausschnitt beginnt (damit die Links stimmen).
 - `--intervall 30`: Sekunden zwischen den Stichproben (Standard 30). Der Start eines Kampfes wird danach durch Halbieren des Zeitfensters auf etwa 2 Sekunden genau bestimmt.
 - `--hoehe 480`: Bildhöhe, die bei Twitch-Adressen geladen wird (Standard 480p, deutlich weniger Daten als 720p).
+- Bei Twitch-Adressen liefert yt-dlp die Kapitel (Spielwechsel). Nur Abschnitte, deren Spiel zu `--kapitel` passt (Standard `dark souls.*remastered`), werden ausgewertet. Videos ohne solchen Abschnitt werden übersprungen, `--ganzes-video` ignoriert die Kapitel. Das spart Zeit und ersetzt den Titelfilter bei `scan-kanal`. Ohne Kapitel-Angaben (lokale Dateien) wird alles ausgewertet.
 - Schon eingetragene Videos werden übersprungen (`--neu` wertet erneut aus).
 - Die Datenbank liegt in `daten/archiv.db` (nicht im Repo). `export` schreibt `docs/kaempfe.json`, die Suchseite `docs/index.html` liest diese Datei.
 

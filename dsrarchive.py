@@ -256,33 +256,38 @@ def schluesselbild_abstand(quelle):
     return (zeiten[-1] - zeiten[0]) / (len(zeiten) - 1) if len(zeiten) >= 2 else None
 
 
-def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True):
-    """Liefert alle `intervall` Sekunden den unteren Bildbereich als Graustufenbild.
+def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
+    """Liefert alle `intervall` Sekunden den unteren Bildbereich als Bild.
 
     Es werden nur Schlüsselbilder dekodiert (bei Twitch alle 2 Sekunden): das ist etwa
     zehnmal schneller als jedes Bild zu dekodieren. Die echten Zeitpunkte der gelieferten
     Bilder stehen nach Ende der Schleife in `zeiten`.
+    `bereiche`: Liste von (von, bis) in Sekunden, nur diese Abschnitte werden gelesen
+    (Zeitstempel bleiben die des ganzen Videos). Ohne Angabe wird alles gelesen.
     """
     vf, b, sh = _vf(w, h)
     logpfad = os.path.join(TMP, "ffmpeg.log")
-    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-v", "info", *(["-skip_frame", "nokey"] if nur_schluessel else []), "-i", quelle,
-           "-vf", f"select='eq(n,0)+gt(floor(t/{intervall}),floor(prev_selected_t/{intervall}))',showinfo,{vf}",
-           "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    with open(logpfad, "wb") as log:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
-        try:
-            while True:
-                daten = _lies(p.stdout, b * sh * 3)
-                if daten is None:
-                    break
-                yield Image.frombytes("RGB", (b, sh), daten)
-        finally:
-            p.kill()
     zeiten.clear()
-    for l in open(logpfad, encoding="utf-8", errors="replace"):
-        m = re.search(r"Parsed_showinfo.*?pts_time:\s*([0-9.]+)", l)
-        if m:
-            zeiten.append(float(m.group(1)))
+    for ab, bis in (bereiche or [(None, None)]):
+        vorn = ["-ss", str(ab), "-t", str(bis - ab), "-copyts"] if ab is not None else []
+        cmd = ["ffmpeg", "-hide_banner", "-nostats", "-v", "info", *(["-skip_frame", "nokey"] if nur_schluessel else []),
+               *vorn, "-i", quelle,
+               "-vf", f"select='eq(n,0)+gt(floor(t/{intervall}),floor(prev_selected_t/{intervall}))',showinfo,{vf}",
+               "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+        with open(logpfad, "wb") as log:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
+            try:
+                while True:
+                    daten = _lies(p.stdout, b * sh * 3)
+                    if daten is None:
+                        break
+                    yield Image.frombytes("RGB", (b, sh), daten)
+            finally:
+                p.kill()
+        for l in open(logpfad, encoding="utf-8", errors="replace"):
+            m = re.search(r"Parsed_showinfo.*?pts_time:\s*([0-9.]+)", l)
+            if m:
+                zeiten.append(float(m.group(1)))
 
 
 def bild_bei(quelle, w, h, t):
@@ -393,9 +398,9 @@ def db_oeffnen(pfad):
 
 
 def quelle_aufloesen(quelle, a):
-    """Gibt (Abspielquelle, Streamer, Titel, Twitch-ID) zurück."""
+    """Gibt (Abspielquelle, Streamer, Titel, Twitch-ID, Kapitel) zurück. Kapitel: Liste mit start_time, end_time, title (Spielwechsel) oder None."""
     streamer, titel, tid = a.streamer, a.titel, a.twitch_id
-    src = quelle
+    src, kapitel = quelle, None
     if re.match(r"https?://", quelle):
         m = re.search(r"videos/(\d+)", quelle)
         tid = tid or (m and m.group(1))
@@ -405,15 +410,19 @@ def quelle_aufloesen(quelle, a):
         if r.returncode:
             sys.exit("yt-dlp konnte die Adresse nicht auflösen:\n" + r.stderr[-400:])
         src = r.stdout.split()[0]
-        r = subprocess.run(["yt-dlp", "--skip-download", "--print", "%(uploader)s\t%(title)s", quelle],
+        r = subprocess.run(["yt-dlp", "--skip-download", "--print", "%(uploader)s\t%(title)s\t%(chapters)j", quelle],
                            capture_output=True, text=True)
-        if r.returncode == 0 and "\t" in r.stdout:
-            u, t = r.stdout.strip().split("\t", 1)
+        if r.returncode == 0 and r.stdout.count("\t") >= 2:
+            u, t, ch = r.stdout.strip().split("\t", 2)
             streamer, titel = streamer or u, titel or t
+            try:
+                kapitel = json.loads(ch) or None
+            except ValueError:
+                kapitel = None
     else:
         m = re.search(r"\[?v(\d{6,})\]?", os.path.basename(quelle))
         tid = tid or (m and m.group(1))
-    return src, streamer or "unbekannt", titel or os.path.basename(quelle), tid
+    return src, streamer or "unbekannt", titel or os.path.basename(quelle), tid, kapitel
 
 
 def scan(a):
@@ -425,7 +434,7 @@ def scan(a):
     if alt and not a.neu:
         print("Schon in der Datenbank, übersprungen (--neu zum erneuten Auswerten).")
         return
-    src, streamer, titel, tid = quelle_aufloesen(a.quelle, a)
+    src, streamer, titel, tid, kapitel = quelle_aufloesen(a.quelle, a)
     if alt:
         db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
         db.execute("DELETE FROM videos WHERE id=?", alt)
@@ -434,13 +443,24 @@ def scan(a):
     treffer, zeiten, kal, vollsuchen, streifen, voll = [], [], None, 0, 0, set()
     letzter = None   # Index der letzten Stichprobe mit Treffer
     t0 = time.time()
+    bereiche = None
+    if kapitel and not a.ganzes_video:
+        rx = re.compile(a.kapitel, re.I)
+        bereiche = [(max(0, k["start_time"]), min(dauer, k["end_time"])) for k in kapitel if rx.search(k.get("title") or "")]
+        bereiche = [x for x in bereiche if x[1] - x[0] >= 60]
+        if not bereiche:
+            print("  Kein Kapitel mit Dark Souls Remastered, Video übersprungen (--ganzes-video wertet trotzdem aus).")
+            return
+        print("  Ausgewertet werden nur diese Abschnitte: " + ", ".join(f"{hms(x)}–{hms(y)}" for x, y in bereiche))
+    elif not kapitel:
+        print("  Keine Kapitel-Angaben, das ganze Video wird ausgewertet.")
     nur_schluessel = True
     if not re.match(r"https?://", a.quelle):
         ab = schluesselbild_abstand(src)
         if ab is None or ab > 6:   # Twitch: alle 2 s; bei seltenen Schlüsselbildern alle Bilder dekodieren
             nur_schluessel = False
             print(f"  Schlüsselbilder nur alle {ab and round(ab)} s: dekodiere alle Bilder (langsamer)", file=sys.stderr)
-    for i, img in enumerate(bilder(src, w, h, a.intervall, zeiten, nur_schluessel)):
+    for i, img in enumerate(bilder(src, w, h, a.intervall, zeiten, nur_schluessel, bereiche)):
         hit = None
         # Läuft gerade ein Kampf (Treffer vor kurzem)? Nur dann gilt die Namensposition des letzten
         # Treffers. Danach verfällt sie, sonst würde ein neuer Boss an anderer Stelle übersehen
@@ -624,6 +644,9 @@ def scan_optionen(s):
     s.add_argument("--ohne-leistenpruefung", action="store_true",
                    help="auch Namen zählen, unter denen keine rote Lebensleiste liegt (z. B. bei Farbfiltern im Stream)")
     s.add_argument("--neu", action="store_true", help="schon vorhandenes Video erneut auswerten")
+    s.add_argument("--kapitel", default=r"dark souls.*remastered",
+                   help="nur Videoabschnitte (Twitch-Kapitel) auswerten, deren Spielname dazu passt")
+    s.add_argument("--ganzes-video", action="store_true", help="Kapitel ignorieren, das ganze Video auswerten")
 
 
 def main():
