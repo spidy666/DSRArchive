@@ -1,0 +1,17 @@
+# Twitch-Kanäle für `scan-kanaele`. Eine Zeile pro Kanal, Name wie in der Adresse (twitch.tv/NAME).
+# Text nach # ist Kommentar.
+H0llyLP
+falganwow
+donnie_oh
+edopeh
+guppa
+kadditv
+bonjwa      # auf diesem Kanal streamen zwei Streamer, Zuordnung offen
+maxim
+sunglitters
+suuN
+pietsmiet
+handofblood
+mahluna
+LillyTheChilly
+knister

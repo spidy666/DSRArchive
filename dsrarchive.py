@@ -589,6 +589,24 @@ def scan_kanal(a):
             return
 
 
+def scan_kanaele(a):
+    """Wertet die Kanäle aus einer Textdatei (kanaele.txt) nacheinander aus."""
+    kanaele = []
+    for z in open(a.datei, encoding="utf-8"):
+        z = z.split("#")[0].strip()
+        if z:
+            kanaele.append(z)
+    print(f"{len(kanaele)} Kanäle aus {a.datei}")
+    for k in kanaele:
+        print(f"\n##### Kanal {k}")
+        b = argparse.Namespace(**vars(a))
+        b.kanal = k
+        try:
+            scan_kanal(b)
+        except SystemExit as e:
+            print(f"  Kanal übersprungen: {e}", file=sys.stderr)
+
+
 def scan_optionen(s):
     s.add_argument("--streamer")
     s.add_argument("--titel")
@@ -624,6 +642,14 @@ def main():
     k.add_argument("--nur-liste", action="store_true", help="nur die Videoliste zeigen, nichts auswerten")
     scan_optionen(k)
     k.set_defaults(f=scan_kanal)
+    ks = sub.add_parser("scan-kanaele", help="alle Kanäle aus kanaele.txt auswerten")
+    ks.add_argument("--datei", default=os.path.join(HIER, "kanaele.txt"))
+    ks.add_argument("--max", type=int, default=5, help="je Kanal höchstens so viele Videos (neueste zuerst)")
+    ks.add_argument("--titel-filter", help="nur Videos, deren Titel zu diesem Ausdruck passt")
+    ks.add_argument("--min-dauer", type=int, default=20)
+    ks.add_argument("--nur-liste", action="store_true")
+    scan_optionen(ks)
+    ks.set_defaults(f=scan_kanaele)
     e = sub.add_parser("export")
     e.add_argument("--out", default=os.path.join(HIER, "docs", "kaempfe.json"))
     e.set_defaults(f=export)
