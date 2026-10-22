@@ -6,7 +6,7 @@ donnie_oh
 edopeh
 guppa
 kadditv
-bonjwa      # auf diesem Kanal streamen zwei Streamer, Zuordnung offen
+bonjwa      # zwei Streamer auf einem Kanal, als Streamer gilt der Kanalname
 maxim
 sunglitters
 suuN
