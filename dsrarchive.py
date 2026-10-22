@@ -116,6 +116,34 @@ def vergleiche(text, namen, schwelle):
     return (best, bs) if bs >= schwelle else (None, bs)
 
 
+# ---------------------------------------------------------------- Leistenprüfung
+LEISTENPRUEFUNG = True
+
+
+def hat_leiste(rgb, box):
+    """Prüft, ob unter dem Namen die Lebensleiste des Bosses liegt (ein waagerechtes rotes Band
+    ab dem linken Namensrand). Chat, Overlays und Untertitel haben das nicht, so werden Namen
+    in normalem Text nicht als Bosskampf gezählt."""
+    W, H = rgb.size
+    l, o, bw, bh = box
+    y0, y1 = min(H, o + bh), min(H, o + bh + max(6, 3 * bh))
+    x0, x1 = max(0, l - int(0.01 * W)), min(W, l + int(0.25 * W))
+    if y1 - y0 < 2 or x1 - x0 < 20:
+        return False
+    px = rgb.crop((x0, y0, x1, y1)).load()
+    breite = x1 - x0
+    zeilen = 0
+    for y in range(y1 - y0):
+        rot = 0
+        for x in range(breite):
+            r, g, b = px[x, y]
+            if r >= 22 and r > 1.8 * (g + 2) and r > 1.8 * (b + 2):   # dunkles Rot der Leiste
+                rot += 1
+        if rot >= 0.5 * breite:
+            zeilen += 1
+    return zeilen >= 2
+
+
 # ---------------------------------------------------------------- Texterkennung
 def tesseract_zeilen(pfad, sprache, psm):
     """Wörter mit Position, nach Textzeile gruppiert."""
@@ -135,6 +163,7 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
     """Sucht im Bild (Graustufen) nach einem Bossnamen. Gibt den besten Treffer
     {score, key, name, kandidaten, text, box, variante} oder None zurück."""
     best, nah = None, 0
+    rgb, img = img, img.convert("L")
     for vname, filt in VARIANTEN.items():
         if varianten and vname not in varianten:
             continue
@@ -152,6 +181,8 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
                         o = min(w[1] for w in wörter[i:j + 1])
                         r = max(w[0] + w[2] for w in wörter[i:j + 1])
                         u = max(w[1] + w[3] for w in wörter[i:j + 1])
+                        if LEISTENPRUEFUNG and not hat_leiste(rgb, (l, o, r - l, u - o)):
+                            continue
                         best = {"score": s, "key": n, "name": namen[n]["anzeige"],
                                 "kandidaten": namen[n]["kandidaten"], "text": text,
                                 "box": [l, o, r - l, u - o], "variante": vname}
@@ -181,7 +212,7 @@ def _vf(w, h):
     b = breite_fuer(w)
     ch = int(h * (1 - BEREICH_Y)) // 2 * 2
     sh = max(2, round(b * ch / w / 2) * 2)
-    return f"crop={w}:{ch}:0:{h - ch},scale={b}:{sh},format=gray", b, sh
+    return f"crop={w}:{ch}:0:{h - ch},scale={b}:{sh},format=rgb24", b, sh
 
 
 def _lies(f, n):
@@ -221,15 +252,15 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True):
     logpfad = os.path.join(TMP, "ffmpeg.log")
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-v", "info", *(["-skip_frame", "nokey"] if nur_schluessel else []), "-i", quelle,
            "-vf", f"select='eq(n,0)+gt(floor(t/{intervall}),floor(prev_selected_t/{intervall}))',showinfo,{vf}",
-           "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+           "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     with open(logpfad, "wb") as log:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
         try:
             while True:
-                daten = _lies(p.stdout, b * sh)
+                daten = _lies(p.stdout, b * sh * 3)
                 if daten is None:
                     break
-                yield Image.frombytes("L", (b, sh), daten)
+                yield Image.frombytes("RGB", (b, sh), daten)
         finally:
             p.kill()
     zeiten.clear()
@@ -242,11 +273,11 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True):
 def bild_bei(quelle, w, h, t):
     vf, b, sh = _vf(w, h)
     r = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(max(0, t)), "-i", quelle,
-                        "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                        "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                        capture_output=True)
-    if len(r.stdout) < b * sh:
+    if len(r.stdout) < b * sh * 3:
         return None
-    return Image.frombytes("L", (b, sh), r.stdout[:b * sh])
+    return Image.frombytes("RGB", (b, sh), r.stdout[:b * sh * 3])
 
 
 def streifen_um(hit, groesse):
@@ -261,7 +292,10 @@ def suche_mit_streifen(img, kal, namen, sprache, schwelle):
     """Schnelle Suche im bekannten Streifen (ein Bildfilter genügt meist, der zweite als Rückfall)."""
     if not kal:
         return None
-    return finde_namen(img.crop(kal), namen, sprache, schwelle, varianten=("scharf170", "hell130"))
+    hit = finde_namen(img.crop(kal), namen, sprache, schwelle, varianten=("scharf170", "hell130"))
+    if hit:   # Position auf das ganze Bild umrechnen
+        hit["box"] = [hit["box"][0] + kal[0], hit["box"][1] + kal[1], hit["box"][2], hit["box"][3]]
+    return hit
 
 
 # ---------------------------------------------------------------- Kämpfe bilden
@@ -368,6 +402,8 @@ def quelle_aufloesen(quelle, a):
 
 
 def scan(a):
+    global LEISTENPRUEFUNG
+    LEISTENPRUEFUNG = not a.ohne_leistenpruefung
     namen = lade_namen(a.namen, a.auch_deutsch)
     db = db_oeffnen(a.db)
     src, streamer, titel, tid = quelle_aufloesen(a.quelle, a)
@@ -504,6 +540,8 @@ def main():
     s.add_argument("--luecke", type=int, default=90, help="Sekunden ohne Treffer, bis ein Kampf als beendet gilt")
     s.add_argument("--schwelle", type=float, default=0.85)
     s.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
+    s.add_argument("--ohne-leistenpruefung", action="store_true",
+                   help="auch Namen zählen, unter denen keine rote Lebensleiste liegt (z. B. bei Farbfiltern im Stream)")
     s.add_argument("--neu", action="store_true", help="schon vorhandenes Video erneut auswerten")
     s.set_defaults(f=scan)
     e = sub.add_parser("export")
