@@ -294,6 +294,7 @@ def suche_luecke(k, zeit, voll, quelle, w, h, namen, sprache, schwelle):
         hit = finde_namen(img, namen, sprache, schwelle) if img else None
         if hit and hit["key"] == k["key"]:
             start, j = zeit(j), j - 1
+            k["treffer"] += 1
         else:
             return zeit(j), start
     return start, start
@@ -380,6 +381,7 @@ def scan(a):
     w, h, dauer = video_info(src)
     print(f"{streamer}: {titel} ({w}x{h}, {hms(dauer)}), Twitch-ID: {tid or 'unbekannt'}")
     treffer, zeiten, kal, vollsuchen, streifen, voll = [], [], None, 0, 0, set()
+    letzter = None   # Index der letzten Stichprobe mit Treffer
     t0 = time.time()
     nur_schluessel = True
     if not re.match(r"https?://", a.quelle):
@@ -392,11 +394,14 @@ def scan(a):
         if kal and i % VOLLSUCHE_ALLE:
             hit = suche_mit_streifen(img, kal, namen, a.lang, a.schwelle)
             streifen += 1
-        if not hit and (not kal or i % VOLLSUCHE_ALLE == 0):
+        # Läuft gerade ein Kampf (Treffer vor kurzem), bei Streifen-Fehlschlag das ganze Bild prüfen
+        aktiv = letzter is not None and (i - letzter) * a.intervall <= a.luecke
+        if not hit and (not kal or i % VOLLSUCHE_ALLE == 0 or aktiv):
             hit = finde_namen(img, namen, a.lang, a.schwelle)
             vollsuchen += 1
             voll.add(i)
         if hit:
+            letzter = i
             kal = streifen_um(hit, img.size)
             treffer.append((i, None, hit))
             print(f"  Bild {i}  {hit['text']!r}  {hit['score']:.2f}", file=sys.stderr)
@@ -409,6 +414,19 @@ def scan(a):
     for k in kaempfe:
         lo, k["start"] = suche_luecke(k, zeit, voll, src, w, h, namen, a.lang, a.schwelle)
         verfeinere_start(k, lo, src, w, h, namen, a.lang, a.schwelle, kal)
+    # Kämpfe desselben Namens, die sich nach der Startbestimmung berühren, sind ein Kampf
+    kaempfe.sort(key=lambda k: k["start"])
+    zusammen = []
+    for k in kaempfe:
+        m = next((x for x in reversed(zusammen) if x["key"] == k["key"]), None)
+        if m and k["start"] - m["ende"] <= a.luecke:
+            m["ende"] = max(m["ende"], k["ende"])
+            m["treffer"] += k["treffer"]
+            m["score"] = max(m["score"], k["score"])
+        else:
+            zusammen.append(k)
+    kaempfe = zusammen
+    for k in kaempfe:
         k["start"] += a.versatz   # Zeiten beziehen sich auf das ganze Twitch-Video
         k["ende"] += a.versatz
     print(f"Auswertung: {len(zeiten) or 'ca. ' + str(int(dauer / a.intervall))} Stichproben, "
