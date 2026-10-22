@@ -121,25 +121,38 @@ LEISTENPRUEFUNG = True
 
 
 def hat_leiste(rgb, box):
-    """Prüft, ob unter dem Namen die Lebensleiste des Bosses liegt (ein waagerechtes rotes Band
-    ab dem linken Namensrand). Chat, Overlays und Untertitel haben das nicht, so werden Namen
-    in normalem Text nicht als Bosskampf gezählt."""
+    """Prüft, ob unter dem Namen die Lebensleiste des Bosses liegt: ein waagerechtes rotes Band,
+    das nahe am linken Namensrand beginnt. Es zählt die längste zusammenhängende rote Strecke
+    einer Zeile (mindestens 3 % der Bildbreite), damit auch eine fast leere Leiste erkannt wird.
+    Chat, Overlays und Untertitel haben das nicht, so werden Namen in normalem Text nicht als
+    Bosskampf gezählt."""
     W, H = rgb.size
     l, o, bw, bh = box
     y0, y1 = min(H, o + bh), min(H, o + bh + max(6, 3 * bh))
-    x0, x1 = max(0, l - int(0.01 * W)), min(W, l + int(0.25 * W))
+    x0, x1 = max(0, l - int(0.02 * W)), min(W, l + int(0.27 * W))
     if y1 - y0 < 2 or x1 - x0 < 20:
         return False
     px = rgb.crop((x0, y0, x1, y1)).load()
     breite = x1 - x0
+    mindest = int(0.03 * W)
+    fruehester_start = (l - x0) - int(0.007 * W)    # echte Leiste beginnt am Namensrand, nicht weit links davon
+    spaetester_start = (l - x0) + int(0.04 * W)
     zeilen = 0
     for y in range(y1 - y0):
-        rot = 0
+        lauf = start = 0
+        ok = False
         for x in range(breite):
             r, g, b = px[x, y]
             if r >= 22 and r > 1.8 * (g + 2) and r > 1.8 * (b + 2):   # dunkles Rot der Leiste
-                rot += 1
-        if rot >= 0.5 * breite:
+                if lauf == 0:
+                    start = x
+                lauf += 1
+                if lauf >= mindest and fruehester_start <= start <= spaetester_start:
+                    ok = True
+                    break
+            else:
+                lauf = 0
+        if ok:
             zeilen += 1
     return zeilen >= 2
 
