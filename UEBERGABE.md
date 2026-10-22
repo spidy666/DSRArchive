@@ -22,3 +22,8 @@ Für eine neue Sitzung. Zuerst `README.md` und `dsrarchive.py` lesen. Antworten 
 5. Kanalabfrage per Twitch-API (Videos je Kanal, Kategorie über die Texterkennung bestätigen).
 6. Nebenspur: Transkript des Boss-Erklärvideos (Whisper) lesen und Fragen beantworten.
 7. Twitch-Bedingungen für das Abrufen fremder Videos prüft Matthias selbst; Streamer-Namen vor einer Veröffentlichung klären.
+
+## Stand 22.10.2026: Test am 6-Stunden-Video (H0llyLP, 2905111020)
+Gesamtlauf 341 s (480p, Abstand 30 s), 12 Kämpfe. Am Video geprüft: Bell Gargoyle (1:07:41), Iron Golem (4:01:39 Beginn, 4:03:54 zweiter Abschnitt nach 114 s Lücke), Ornstein und Smough (4:41:58, Smough ist Teil desselben Kampfes), Sif (5:19:16), Ceaseless Discharge (5:33:30).
+Behobene Fehler: Leistenprüfung verlor Sif bei fast leerer Leiste (jetzt zusammenhängende rote Strecke ab 3 % der Breite, Beginn am Namensrand); Namensposition verfiel nie, dadurch wurde Sif im Gesamtlauf übersehen; Teilname „Gargoyle" schlug „Bell Gargoyle".
+Offen: Ende/Sieg (leere Leiste = besiegt), Mini-Bosse ohne Namensleiste, Deutung Platz oder Ersatz aus Reihenfolge, Kanalliste per Twitch-API, `export` und GitHub Pages (privates Repo), Flüstern-Transkript (Whisper) des Bosslagen-Videos.
