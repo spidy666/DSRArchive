@@ -18,6 +18,7 @@ python dsrarchive.py suche gargoyle
 python dsrarchive.py export
 ```
 - Bei einer Twitch-Adresse werden Streamer, Titel und ID automatisch ermittelt (yt-dlp). Bei Dateien wird die ID aus dem Dateinamen gelesen, wenn er `[v1234567890]` enthält (so benennt yt-dlp), sonst mit `--twitch-id` angeben.
+- `--versatz 12600`: Sekunde im Gesamtvideo, bei der ein heruntergeladener Ausschnitt beginnt (damit die Links stimmen).
 - `--intervall 20`: Sekunden zwischen den Stichproben. Der Start eines Kampfes wird danach in 2-Sekunden-Schritten genauer bestimmt.
 - Schon eingetragene Videos werden übersprungen (`--neu` wertet erneut aus).
 - Die Datenbank liegt in `daten/archiv.db` (nicht im Repo). `export` schreibt `docs/kaempfe.json`, die Suchseite `docs/index.html` liest diese Datei.

@@ -274,6 +274,8 @@ def scan(a):
     kaempfe = [k for k in gruppiere(treffer, a.luecke) if k["treffer"] >= 2 or k["score"] >= 0.9]
     for k in kaempfe:
         verfeinere_start(k, src, w, h, a.intervall, namen, a.lang, a.schwelle)
+        k["start"] += a.versatz   # Zeiten beziehen sich auf das ganze Twitch-Video
+        k["ende"] += a.versatz
     cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am) "
                      "VALUES(?,?,?,?,?,?,?)",
                      (a.quelle, streamer, tid, titel, a.modus, dauer, datetime.now().isoformat(timespec="seconds")))
@@ -331,6 +333,8 @@ def main():
     s.add_argument("--streamer")
     s.add_argument("--titel")
     s.add_argument("--twitch-id")
+    s.add_argument("--versatz", type=int, default=0,
+                   help="Sekunden, bei denen ein heruntergeladener Ausschnitt im Gesamtvideo beginnt")
     s.add_argument("--modus", default="randomizer")
     s.add_argument("--lang", default="eng")
     s.add_argument("--intervall", type=int, default=20, help="Sekunden zwischen den Stichproben")
