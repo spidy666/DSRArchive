@@ -19,7 +19,8 @@ python dsrarchive.py export
 ```
 - Bei einer Twitch-Adresse werden Streamer, Titel und ID automatisch ermittelt (yt-dlp). Bei Dateien wird die ID aus dem Dateinamen gelesen, wenn er `[v1234567890]` enthält (so benennt yt-dlp), sonst mit `--twitch-id` angeben.
 - `--versatz 12600`: Sekunde im Gesamtvideo, bei der ein heruntergeladener Ausschnitt beginnt (damit die Links stimmen).
-- `--intervall 20`: Sekunden zwischen den Stichproben. Der Start eines Kampfes wird danach in 2-Sekunden-Schritten genauer bestimmt.
+- `--intervall 30`: Sekunden zwischen den Stichproben (Standard 30). Der Start eines Kampfes wird danach durch Halbieren des Zeitfensters auf etwa 2 Sekunden genau bestimmt.
+- `--hoehe 480`: Bildhöhe, die bei Twitch-Adressen geladen wird (Standard 480p, deutlich weniger Daten als 720p).
 - Schon eingetragene Videos werden übersprungen (`--neu` wertet erneut aus).
 - Die Datenbank liegt in `daten/archiv.db` (nicht im Repo). `export` schreibt `docs/kaempfe.json`, die Suchseite `docs/index.html` liest diese Datei.
 
@@ -27,12 +28,12 @@ python dsrarchive.py export
 Aus dem unteren Teil des Bildes (ab 55 % der Höhe) wird alle N Sekunden ein Bild geholt. Tesseract liest den Text mit drei Bildfiltern, der beste Treffer gegen die englischen Bossnamen (unscharfer Vergleich, auch Namensanfänge wie „Chaos Witch“) gewinnt. Es gibt keinen festen Ausschnitt, die Namensleiste wird im Bild gesucht.
 
 ## Stand und Grenzen
-Getestet an künstlichen Videos (720p und 1080p), die aus drei echten Screenshots zusammengesetzt sind: alle drei Kämpfe gefunden, Startzeit auf die Sekunde. Mit echten Videos noch nicht.
+Getestet an künstlichen Videos aus drei Screenshots (alle drei Kämpfe gefunden) und an einem echten Twitch-Clip (Seath-Kampf, 720p und 480p, Abstände von 15 bis 60 Sekunden: immer gefunden, Start auf etwa 3 Sekunden genau). Trefferquote pro Bild im Kampf: 96 % bei 720p, 93 % bei 480p, keine Fehltreffer auf 18 Bildern ohne Boss. Das ist nur ein Boss und ein Streamer, mehr Material fehlt noch.
 - Mini-Bosse haben keine Namensleiste und werden nicht erfasst. Welche Plätze eine haben, ist noch nicht geklärt.
 - Mehrere Plätze heißen gleich (Kanalisierer, Untoter Drache, Reißkeiler, Ritter von Berenike, Titanitdämon): Dann stehen alle Kandidaten im Ergebnis. Dasselbe gilt für Namen, die zugleich Ersatz-Gegner an anderen Plätzen sind (Pinwheel steht auch am Asylum-Dämon- und am Mondlicht-Schmetterling-Platz).
 - Kein Siegesbanner: Auch Kämpfe, die der Spieler verliert, werden eingetragen. Ein Eintrag heißt „Boss war an der Leiste“, nicht „besiegt“.
 - Mögliche Fehltreffer: Einblendungen im Bild, die Gegnernamen zeigen (z. B. die Liste des Trackers als Overlay unten im Bild), können als Treffer gelesen werden. Eine Prüfung „Leiste unter dem Namen“ fehlt noch.
-- Tempo: etwa 2 Sekunden pro Stichprobe. Ein 6-Stunden-Video mit `--intervall 20` braucht rund eine halbe Stunde. Eine schnelle Vorprüfung, ob überhaupt eine Leiste im Bild ist, fehlt noch.
+- Tempo (gemessen an einem echten 4-Minuten-Clip, auf 6 Stunden hochgerechnet): nur Schlüsselbilder werden dekodiert (etwa 10-mal schneller), nach dem ersten Treffer wird nur noch ein Streifen um die Namensposition gelesen. Das ergibt grob 6 bis 9 Minuten pro 6-Stunden-Datei bei 30 Sekunden Abstand, ohne die Zeit für den Download. Das ist eine Schätzung, kein Messwert an einer ganzen Datei.
 - Die englischen Namen in `namen.json` sind die der Tracker-Liste und können von den Spieltexten abweichen.
 
 ## Hinweise

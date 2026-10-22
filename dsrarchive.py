@@ -12,13 +12,14 @@ Befehle:
 Voraussetzungen: Python 3, Pillow (pip install pillow), ffmpeg + ffprobe und tesseract
 im PATH (für deutschen Spieltext die Sprachdatei deu), für Adressen zusätzlich yt-dlp.
 """
-import argparse, difflib, json, os, re, sqlite3, subprocess, sys, tempfile, unicodedata
+import argparse, difflib, json, os, re, sqlite3, subprocess, sys, tempfile, time, unicodedata
 from datetime import datetime
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 HIER = os.path.dirname(os.path.abspath(__file__))
-BREITE = 1920      # Breite, auf die der durchsuchte Bildbereich skaliert wird
+BREITE_MAX = 1920  # größte Breite, auf die der durchsuchte Bildbereich hochskaliert wird
+VOLLSUCHE_ALLE = 6 # bei bekannter Namensposition nur jede n-te Stichprobe das ganze Bild durchsuchen
 BEREICH_Y = 0.55   # durchsucht wird der untere Teil des Bildes ab dieser Höhe (0..1)
 LINK_VORLAUF = 10  # Sekunden vor Kampfbeginn, auf die der Link zeigt
 TMP = tempfile.mkdtemp(prefix="dsrarchiv_")
@@ -26,9 +27,10 @@ TMP = tempfile.mkdtemp(prefix="dsrarchiv_")
 # Bildfilter: Texterkennung klappt je nach Hintergrund mit anderem Filter besser,
 # darum werden mehrere probiert und der beste Namenstreffer gewinnt.
 VARIANTEN = {
+    # schärfen + hell/dunkel trennen: an echten Videos (480p und 720p) mit Abstand am besten
+    "scharf170": lambda b: b.filter(ImageFilter.UnsharpMask(2, 150, 3)).point(lambda v: 0 if v > 170 else 255),
+    "hell130": lambda b: b.point(lambda v: 0 if v > 130 else 255),
     "plain": lambda b: b,
-    "hell170": lambda b: b.point(lambda v: 0 if v > 170 else 255),
-    "hell200": lambda b: b.point(lambda v: 0 if v > 200 else 255),
 }
 
 
@@ -122,11 +124,13 @@ def tesseract_zeilen(pfad, sprache, psm):
     return zeilen
 
 
-def finde_namen(img, namen, sprache, schwelle, psm=11):
+def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
     """Sucht im Bild (Graustufen) nach einem Bossnamen. Gibt den besten Treffer
-    {score, rows, text, box, variante} oder None zurück."""
-    best = None
+    {score, key, name, kandidaten, text, box, variante} oder None zurück."""
+    best, nah = None, 0
     for vname, filt in VARIANTEN.items():
+        if varianten and vname not in varianten:
+            continue
         pfad = os.path.join(TMP, "f.png")
         filt(img).save(pfad)
         for wörter in tesseract_zeilen(pfad, sprache, psm).values():
@@ -135,6 +139,7 @@ def finde_namen(img, namen, sprache, schwelle, psm=11):
                 for j in range(i, min(i + 5, len(wörter))):
                     text = " ".join(w[4] for w in wörter[i:j + 1])
                     n, s = vergleiche(text, namen, schwelle)
+                    nah = max(nah, s)
                     if n and (best is None or s > best["score"]):
                         l = min(w[0] for w in wörter[i:j + 1])
                         o = min(w[1] for w in wörter[i:j + 1])
@@ -145,6 +150,8 @@ def finde_namen(img, namen, sprache, schwelle, psm=11):
                                 "box": [l, o, r - l, u - o], "variante": vname}
         if best and best["score"] >= 0.97:
             break
+        if not best and nah < 0.6:
+            break  # nichts Namensähnliches gelesen: weitere Filter bringen bei Bildern ohne Leiste nichts
     return best
 
 
@@ -158,10 +165,16 @@ def video_info(quelle):
     return s["width"], s["height"], float(d.get("format", {}).get("duration") or 0)
 
 
+def breite_fuer(w):
+    """Quellen mit kleiner Auflösung (z. B. 480p) werden auf das Doppelte hochskaliert."""
+    return min(BREITE_MAX, w * 2) // 2 * 2
+
+
 def _vf(w, h):
+    b = breite_fuer(w)
     ch = int(h * (1 - BEREICH_Y)) // 2 * 2
-    sh = max(2, round(BREITE * ch / w / 2) * 2)
-    return f"crop={w}:{ch}:0:{h - ch},scale={BREITE}:{sh},format=gray", sh
+    sh = max(2, round(b * ch / w / 2) * 2)
+    return f"crop={w}:{ch}:0:{h - ch},scale={b}:{sh},format=gray", b, sh
 
 
 def _lies(f, n):
@@ -174,38 +187,81 @@ def _lies(f, n):
     return buf
 
 
-def bilder(quelle, w, h, intervall, start=0):
-    """Liefert alle `intervall` Sekunden den unteren Bildbereich als Graustufenbild."""
-    vf, sh = _vf(w, h)
-    cmd = ["ffmpeg", "-v", "error", "-ss", str(start), "-i", quelle,
-           "-vf", f"select='eq(n,0)+gt(floor(t/{intervall}),floor(prev_selected_t/{intervall}))',{vf}",
+def schluesselbild_abstand(quelle):
+    """Mittlerer Abstand der Schlüsselbilder in den ersten 2 Minuten (Sekunden), None wenn unbekannt."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+120",
+                        "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", quelle],
+                       capture_output=True, text=True)
+    zeiten = []
+    for l in r.stdout.splitlines():
+        p = l.split(",")
+        if len(p) >= 2 and "K" in p[1]:
+            try:
+                zeiten.append(float(p[0]))
+            except ValueError:
+                pass
+    return (zeiten[-1] - zeiten[0]) / (len(zeiten) - 1) if len(zeiten) >= 2 else None
+
+
+def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True):
+    """Liefert alle `intervall` Sekunden den unteren Bildbereich als Graustufenbild.
+
+    Es werden nur Schlüsselbilder dekodiert (bei Twitch alle 2 Sekunden): das ist etwa
+    zehnmal schneller als jedes Bild zu dekodieren. Die echten Zeitpunkte der gelieferten
+    Bilder stehen nach Ende der Schleife in `zeiten`.
+    """
+    vf, b, sh = _vf(w, h)
+    logpfad = os.path.join(TMP, "ffmpeg.log")
+    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-v", "info", *(["-skip_frame", "nokey"] if nur_schluessel else []), "-i", quelle,
+           "-vf", f"select='eq(n,0)+gt(floor(t/{intervall}),floor(prev_selected_t/{intervall}))',showinfo,{vf}",
            "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    try:
-        while True:
-            daten = _lies(p.stdout, BREITE * sh)
-            if daten is None:
-                break
-            yield Image.frombytes("L", (BREITE, sh), daten)
-    finally:
-        p.kill()
+    with open(logpfad, "wb") as log:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
+        try:
+            while True:
+                daten = _lies(p.stdout, b * sh)
+                if daten is None:
+                    break
+                yield Image.frombytes("L", (b, sh), daten)
+        finally:
+            p.kill()
+    zeiten.clear()
+    for l in open(logpfad, encoding="utf-8", errors="replace"):
+        m = re.search(r"Parsed_showinfo.*?pts_time:\s*([0-9.]+)", l)
+        if m:
+            zeiten.append(float(m.group(1)))
 
 
 def bild_bei(quelle, w, h, t):
-    vf, sh = _vf(w, h)
+    vf, b, sh = _vf(w, h)
     r = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(max(0, t)), "-i", quelle,
                         "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "-"],
                        capture_output=True)
-    if len(r.stdout) < BREITE * sh:
+    if len(r.stdout) < b * sh:
         return None
-    return Image.frombytes("L", (BREITE, sh), r.stdout[:BREITE * sh])
+    return Image.frombytes("L", (b, sh), r.stdout[:b * sh])
+
+
+def streifen_um(hit, groesse):
+    """Bereich um einen gefundenen Namen. Der Name steht linksbündig über der Leiste, seine
+    Länge hängt vom Boss ab, deshalb wird nach rechts großzügig Platz gelassen."""
+    W, H = groesse
+    l, o, bw, bh = hit["box"]
+    return (max(0, l - int(0.03 * W)), max(0, o - bh), min(W, l + int(0.5 * W)), min(H, o + 3 * bh))
+
+
+def suche_mit_streifen(img, kal, namen, sprache, schwelle):
+    """Schnelle Suche im bekannten Streifen (ein Bildfilter genügt meist, der zweite als Rückfall)."""
+    if not kal:
+        return None
+    return finde_namen(img.crop(kal), namen, sprache, schwelle, varianten=("scharf170", "hell130"))
 
 
 # ---------------------------------------------------------------- Kämpfe bilden
 def gruppiere(treffer, luecke):
     """Aufeinanderfolgende Treffer desselben Platzes (Lücke bis `luecke` s) = ein Kampf."""
     kaempfe = []
-    for t, hit in treffer:
+    for idx, t, hit in treffer:
         key = hit["key"]
         k = kaempfe[-1] if kaempfe else None
         if k and k["key"] == key and t - k["ende"] <= luecke:
@@ -214,23 +270,43 @@ def gruppiere(treffer, luecke):
             k["treffer"] += 1
         else:
             kaempfe.append({"key": key, "name": hit["name"], "kandidaten": hit["kandidaten"],
-                            "start": t, "ende": t,
+                            "start": t, "ende": t, "idx": idx,
                             "score": hit["score"], "treffer": 1, "text": hit["text"]})
     return kaempfe
 
 
-def verfeinere_start(k, quelle, w, h, intervall, namen, sprache, schwelle):
-    """Sucht rückwärts in 2-s-Schritten den ersten Zeitpunkt, an dem der Name zu sehen ist."""
-    t, fehl, start = k["start"] - 2, 0, k["start"]
-    while t >= 0 and t > k["start"] - intervall and fehl < 2:
-        img = bild_bei(quelle, w, h, t)
+def suche_luecke(k, zeit, voll, quelle, w, h, namen, sprache, schwelle):
+    """Stichproben vor dem ersten Treffer, die nur im Streifen gelesen wurden, nochmal mit
+    voller Suche prüfen (der Name kann an anderer Stelle stehen, z. B. nach einem Szenenwechsel).
+    Gibt (letzte Zeit ohne Name, frühester Zeitpunkt mit Name) zurück."""
+    start, j = k["start"], k["idx"] - 1
+    while j >= 0:
+        if j in voll:
+            return zeit(j), start
+        img = bild_bei(quelle, w, h, zeit(j))
         hit = finde_namen(img, namen, sprache, schwelle) if img else None
         if hit and hit["key"] == k["key"]:
-            start, fehl = t, 0
+            start, j = zeit(j), j - 1
         else:
-            fehl += 1
-        t -= 2
-    k["start"] = start
+            return zeit(j), start
+    return start, start
+
+
+def verfeinere_start(k, lo, quelle, w, h, namen, sprache, schwelle, kal):
+    """Halbiert das Zeitfenster zwischen der letzten Stichprobe ohne und der ersten mit Treffer
+    (bis auf 2 Sekunden): so genau wird der Kampfbeginn bestimmt, ohne jede Sekunde zu prüfen."""
+    hi = k["start"]
+    while hi - lo > 2:
+        mitte = (lo + hi) / 2
+        img = bild_bei(quelle, w, h, mitte)
+        hit = None
+        if img:
+            hit = suche_mit_streifen(img, kal, namen, sprache, schwelle) or finde_namen(img, namen, sprache, schwelle)
+        if hit and hit["key"] == k["key"]:
+            hi = mitte
+        else:
+            lo = mitte
+    k["start"] = hi
 
 
 def zeit_link(twitch_id, sek):
@@ -266,7 +342,8 @@ def quelle_aufloesen(quelle, a):
     if re.match(r"https?://", quelle):
         m = re.search(r"videos/(\d+)", quelle)
         tid = tid or (m and m.group(1))
-        fmt = ["-f", "bestvideo[height<=720]/best[height<=720]/best"]
+        hoehe = a.hoehe
+        fmt = ["-f", f"bestvideo[height<={hoehe}]/best[height<={hoehe}]/best"]
         r = subprocess.run(["yt-dlp", "-g", *fmt, quelle], capture_output=True, text=True)
         if r.returncode:
             sys.exit("yt-dlp konnte die Adresse nicht auflösen:\n" + r.stderr[-400:])
@@ -295,19 +372,41 @@ def scan(a):
         db.execute("DELETE FROM videos WHERE id=?", alt)
     w, h, dauer = video_info(src)
     print(f"{streamer}: {titel} ({w}x{h}, {hms(dauer)}), Twitch-ID: {tid or 'unbekannt'}")
-    treffer = []
-    for i, img in enumerate(bilder(src, w, h, a.intervall)):
-        hit = finde_namen(img, namen, a.lang, a.schwelle)
+    treffer, zeiten, kal, vollsuchen, streifen, voll = [], [], None, 0, 0, set()
+    t0 = time.time()
+    nur_schluessel = True
+    if not re.match(r"https?://", a.quelle):
+        ab = schluesselbild_abstand(src)
+        if ab is None or ab > 6:   # Twitch: alle 2 s; bei seltenen Schlüsselbildern alle Bilder dekodieren
+            nur_schluessel = False
+            print(f"  Schlüsselbilder nur alle {ab and round(ab)} s: dekodiere alle Bilder (langsamer)", file=sys.stderr)
+    for i, img in enumerate(bilder(src, w, h, a.intervall, zeiten, nur_schluessel)):
+        hit = None
+        if kal and i % VOLLSUCHE_ALLE:
+            hit = suche_mit_streifen(img, kal, namen, a.lang, a.schwelle)
+            streifen += 1
+        if not hit and (not kal or i % VOLLSUCHE_ALLE == 0):
+            hit = finde_namen(img, namen, a.lang, a.schwelle)
+            vollsuchen += 1
+            voll.add(i)
         if hit:
-            treffer.append((i * a.intervall, hit))
-            print(f"  {hms(i * a.intervall)}  {hit['text']!r}  {hit['score']:.2f}", file=sys.stderr)
+            kal = streifen_um(hit, img.size)
+            treffer.append((i, None, hit))
+            print(f"  Bild {i}  {hit['text']!r}  {hit['score']:.2f}", file=sys.stderr)
         elif i % 50 == 0:
-            print(f"  ... {hms(i * a.intervall)}", file=sys.stderr)
+            print(f"  ... Bild {i}", file=sys.stderr)
+    # echte Zeitpunkte der Bilder (Rückfall: gleichmäßiger Abstand)
+    zeit = lambda i: zeiten[i] if i < len(zeiten) else i * a.intervall
+    treffer = [(i, zeit(i), hit) for i, _, hit in treffer]
     kaempfe = [k for k in gruppiere(treffer, a.luecke) if k["treffer"] >= 2 or k["score"] >= 0.9]
     for k in kaempfe:
-        verfeinere_start(k, src, w, h, a.intervall, namen, a.lang, a.schwelle)
+        lo, k["start"] = suche_luecke(k, zeit, voll, src, w, h, namen, a.lang, a.schwelle)
+        verfeinere_start(k, lo, src, w, h, namen, a.lang, a.schwelle, kal)
         k["start"] += a.versatz   # Zeiten beziehen sich auf das ganze Twitch-Video
         k["ende"] += a.versatz
+    print(f"Auswertung: {len(zeiten) or 'ca. ' + str(int(dauer / a.intervall))} Stichproben, "
+          f"{vollsuchen} volle Suchen, {streifen} Streifen-Suchen, {time.time() - t0:.0f} s",
+          file=sys.stderr)
     cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am) "
                      "VALUES(?,?,?,?,?,?,?)",
                      (a.quelle, streamer, tid, titel, a.modus, dauer, datetime.now().isoformat(timespec="seconds")))
@@ -374,7 +473,8 @@ def main():
     s.add_argument("--modus", default="randomizer")
     s.add_argument("--lang", default="eng", help="Tesseract-Sprache, bei deutschem Spieltext eng+deu")
     s.add_argument("--auch-deutsch", action="store_true", help="auch mit den deutschen Bossnamen vergleichen")
-    s.add_argument("--intervall", type=int, default=20, help="Sekunden zwischen den Stichproben")
+    s.add_argument("--intervall", type=int, default=30, help="Sekunden zwischen den Stichproben")
+    s.add_argument("--hoehe", type=int, default=480, help="Bildhöhe bei Twitch-Adressen (kleiner = weniger Daten)")
     s.add_argument("--luecke", type=int, default=90, help="Sekunden ohne Treffer, bis ein Kampf als beendet gilt")
     s.add_argument("--schwelle", type=float, default=0.85)
     s.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
