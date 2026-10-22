@@ -440,11 +440,16 @@ def scan(a):
             print(f"  Schlüsselbilder nur alle {ab and round(ab)} s: dekodiere alle Bilder (langsamer)", file=sys.stderr)
     for i, img in enumerate(bilder(src, w, h, a.intervall, zeiten, nur_schluessel)):
         hit = None
+        # Läuft gerade ein Kampf (Treffer vor kurzem)? Nur dann gilt die Namensposition des letzten
+        # Treffers. Danach verfällt sie, sonst würde ein neuer Boss an anderer Stelle übersehen
+        # (Sif im 6-Stunden-Video), weil nur noch jedes 6. Bild ganz durchsucht würde.
+        aktiv = letzter is not None and (i - letzter) * a.intervall <= a.luecke
+        if not aktiv:
+            kal = None
         if kal and i % VOLLSUCHE_ALLE:
             hit = suche_mit_streifen(img, kal, namen, a.lang, a.schwelle)
             streifen += 1
-        # Läuft gerade ein Kampf (Treffer vor kurzem), bei Streifen-Fehlschlag das ganze Bild prüfen
-        aktiv = letzter is not None and (i - letzter) * a.intervall <= a.luecke
+        # Bei Streifen-Fehlschlag im laufenden Kampf das ganze Bild prüfen
         if not hit and (not kal or i % VOLLSUCHE_ALLE == 0 or aktiv):
             hit = finde_namen(img, namen, a.lang, a.schwelle)
             vollsuchen += 1
