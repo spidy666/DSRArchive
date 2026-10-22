@@ -43,7 +43,8 @@ def norm(s):
 
 # Plätze, an deren Leiste andere Namen stehen als im Listeneintrag. Anor Londo ist in der Liste
 # ein gemeinsamer Eintrag, an der Leiste stehen aber zwei einzelne Namen.
-ZUSATZNAMEN = {"11-1": ["Dragon Slayer Ornstein", "Executioner Smough"]}
+ZUSATZNAMEN = {"11-1": ["Dragon Slayer Ornstein", "Executioner Smough"],
+               "2-4": ["Bell Gargoyle"]}   # an der Leiste steht die Einzahl (am Video belegt)
 
 
 def lade_namen(pfad, deutsch=False):
@@ -189,7 +190,8 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
                     text = " ".join(w[4] for w in wörter[i:j + 1])
                     n, s = vergleiche(text, namen, schwelle)
                     nah = max(nah, s)
-                    if n and (best is None or s > best["score"]):
+                    laenger = bool(best and best["text"] in text and len(text) > len(best["text"]) and s >= best["score"] - 0.05)
+                    if n and (best is None or s > best["score"] or laenger):   # längerer Text mit fast gleichem Wert gewinnt ("Bell Gargoyle" statt "Gargoyle")
                         l = min(w[0] for w in wörter[i:j + 1])
                         o = min(w[1] for w in wörter[i:j + 1])
                         r = max(w[0] + w[2] for w in wörter[i:j + 1])
