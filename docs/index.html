@@ -37,15 +37,15 @@
 <body>
 <main>
   <h1>DSR-Archiv</h1>
-  <p class="sub">Bosskämpfe in Dark-Souls-Remastered-Randomizer-Streams. Gesucht wird nach dem Namen an der Lebensleiste, das ist der Original-Platz. Rechts steht der Gegner, der dort im Randomizer steht.</p>
+  <p class="sub">Bosskämpfe in Dark-Souls-Remastered-Randomizer-Streams. Gesucht wird nach dem Namen an der Lebensleiste. Der Randomizer zeigt dort manchmal den Namen des Original-Platzes, manchmal den des Ersatz-Gegners. Deshalb stehen bei jedem Treffer die möglichen Deutungen.</p>
   <div class="bar">
-    <input id="q" type="search" placeholder="Suche: Boss, Randomizer-Gegner, Streamer, Gebiet …" autofocus>
+    <input id="q" type="search" placeholder="Suche: Name an der Leiste, Gegner, Streamer, Gebiet …" autofocus>
     <select id="streamer"><option value="">Alle Streamer</option></select>
     <select id="gebiet"><option value="">Alle Gebiete</option></select>
   </div>
   <div class="anz" id="anz"></div>
   <table>
-    <thead><tr><th data-k="streamer">Streamer</th><th data-k="boss">Boss an der Leiste</th><th data-k="rando_de">Randomizer</th><th data-k="gebiet">Gebiet</th><th>Video</th></tr></thead>
+    <thead><tr><th data-k="streamer">Streamer</th><th data-k="boss">Name an der Leiste</th><th>Mögliche Zuordnung</th><th>Video</th></tr></thead>
     <tbody id="body"></tbody>
   </table>
   <p class="sub" id="stand"></p>
@@ -70,16 +70,17 @@
     var liste = daten.filter(function (d) {
       if (s && d.streamer !== s) return false;
       if (g && d.gebiet.split(" / ").indexOf(g) < 0) return false;
-      return !q || norm([d.streamer, d.boss, d.gebiet, d.rando_de, d.rando_en, d.titel].join(" ")).indexOf(q) >= 0;
+      return !q || norm([d.streamer, d.boss, d.gebiet, d.gegner, d.titel].concat(d.deutungen).join(" ")).indexOf(q) >= 0;
     }).sort(function (a, b) { return String(a[sortKey]).localeCompare(String(b[sortKey]), "de") || a.start_s - b.start_s; });
     var body = $("body"); body.textContent = "";
     liste.forEach(function (d) {
       var tr = document.createElement("tr");
       td(tr, d.streamer);
       td(tr, d.boss);
-      var rc = td(tr, d.rando_de);
-      if (d.mehrdeutig) { var m = document.createElement("div"); m.className = "mehr"; m.textContent = "mehrere Plätze mit diesem Namen"; rc.appendChild(m); }
-      td(tr, d.gebiet);
+      var rc = document.createElement("td");
+      d.deutungen.forEach(function (t) { var z = document.createElement("div"); z.textContent = t; rc.appendChild(z); });
+      if (d.deutungen.length > 1) { var m = document.createElement("div"); m.className = "mehr"; m.textContent = "Zuordnung unsicher, mehrere Möglichkeiten"; rc.appendChild(m); }
+      tr.appendChild(rc);
       var v = document.createElement("td");
       if (d.link && /^https:\/\/www\.twitch\.tv\//.test(d.link)) {
         var a = document.createElement("a"); a.href = d.link; a.target = "_blank"; a.rel = "noopener noreferrer";

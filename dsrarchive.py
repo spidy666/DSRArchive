@@ -40,13 +40,43 @@ def norm(s):
 
 
 def lade_namen(pfad, deutsch=False):
-    """norm. Name (Original, standardmäßig nur Englisch) -> Liste der Plätze, die so heißen."""
+    """norm. Name -> {"anzeige": Name, "kandidaten": [...]}.
+
+    Ein Name kann an der Leiste stehen, weil er der Name des Original-Platzes ist
+    ("platz") oder weil der Randomizer bei manchen Ersetzungen den Namen des
+    Ersatz-Gegners mitändert ("ersatz"). Welche Deutung stimmt, sagt der Name allein
+    nicht, deshalb werden alle möglichen gespeichert.
+    """
     namen = {}
+
+    def eintrag(name, deutung, r):
+        if not name:
+            return
+        e = namen.setdefault(norm(name), {"anzeige": name, "kandidaten": []})
+        if any(k["platz"] == r["key"] for k in e["kandidaten"]):
+            return  # Original- und Ersatzname gleich (z. B. Havel): nur einmal
+        e["kandidaten"].append({"deutung": deutung, "platz": r["key"], "gebiet": r["area_de"],
+                                "pts": r["pts"], "original": r["en"], "original_de": r["de"],
+                                "rando_de": r["rando_de"], "rando_en": r["rando_en"]})
+
     for r in json.load(open(pfad, encoding="utf-8")):
-        for n in ((r["de"], r["en"]) if deutsch else (r["en"],)):
-            if n:
-                namen.setdefault(norm(n), []).append(r)
+        eintrag(r["en"], "platz", r)
+        eintrag(r["rando_en"], "ersatz", r)
+        if deutsch:
+            eintrag(r["de"], "platz", r)
+            eintrag(r["rando_de"], "ersatz", r)
     return namen
+
+
+def gegner_text(c):
+    """Der Gegner, der laut dieser Deutung tatsächlich dort steht."""
+    return c["rando_en"] if c.get("deutung", "platz") == "platz" else c.get("anzeige") or c["rando_en"]
+
+
+def deutung_text(c):
+    if c.get("deutung", "platz") == "platz":
+        return f"Platz {c.get('original', '?')} ({c['gebiet']}), dort steht: {c['rando_en']}"
+    return f"Ersatz-Gegner an Platz {c.get('original', '?')} ({c['gebiet']})"
 
 
 def vergleiche(text, namen, schwelle):
@@ -110,7 +140,8 @@ def finde_namen(img, namen, sprache, schwelle, psm=11):
                         o = min(w[1] for w in wörter[i:j + 1])
                         r = max(w[0] + w[2] for w in wörter[i:j + 1])
                         u = max(w[1] + w[3] for w in wörter[i:j + 1])
-                        best = {"score": s, "rows": namen[n], "text": text,
+                        best = {"score": s, "key": n, "name": namen[n]["anzeige"],
+                                "kandidaten": namen[n]["kandidaten"], "text": text,
                                 "box": [l, o, r - l, u - o], "variante": vname}
         if best and best["score"] >= 0.97:
             break
@@ -175,14 +206,15 @@ def gruppiere(treffer, luecke):
     """Aufeinanderfolgende Treffer desselben Platzes (Lücke bis `luecke` s) = ein Kampf."""
     kaempfe = []
     for t, hit in treffer:
-        key = "+".join(r["key"] for r in hit["rows"])
+        key = hit["key"]
         k = kaempfe[-1] if kaempfe else None
         if k and k["key"] == key and t - k["ende"] <= luecke:
             k["ende"] = t
             k["score"] = max(k["score"], hit["score"])
             k["treffer"] += 1
         else:
-            kaempfe.append({"key": key, "rows": hit["rows"], "start": t, "ende": t,
+            kaempfe.append({"key": key, "name": hit["name"], "kandidaten": hit["kandidaten"],
+                            "start": t, "ende": t,
                             "score": hit["score"], "treffer": 1, "text": hit["text"]})
     return kaempfe
 
@@ -193,7 +225,7 @@ def verfeinere_start(k, quelle, w, h, intervall, namen, sprache, schwelle):
     while t >= 0 and t > k["start"] - intervall and fehl < 2:
         img = bild_bei(quelle, w, h, t)
         hit = finde_namen(img, namen, sprache, schwelle) if img else None
-        if hit and "+".join(r["key"] for r in hit["rows"]) == k["key"]:
+        if hit and hit["key"] == k["key"]:
             start, fehl = t, 0
         else:
             fehl += 1
@@ -281,16 +313,17 @@ def scan(a):
                      (a.quelle, streamer, tid, titel, a.modus, dauer, datetime.now().isoformat(timespec="seconds")))
     vid = cur.lastrowid
     for k in kaempfe:
-        r0 = k["rows"][0]
-        kand = [{"platz": r["key"], "gebiet": r["area_de"], "pts": r["pts"],
-                 "rando_de": r["rando_de"], "rando_en": r["rando_en"]} for r in k["rows"]]
+        kand = [dict(c, anzeige=k["name"]) for c in k["kandidaten"]]
+        gebiete = list(dict.fromkeys(c["gebiet"] for c in kand))
+        gegner = list(dict.fromkeys(gegner_text(c) for c in kand))
         db.execute("INSERT INTO kaempfe(video_id,platz,boss,gebiet,rando_de,rando_en,kandidaten,"
                    "start_s,ende_s,konfidenz,treffer) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                   (vid, k["key"], r0["de"], " / ".join(r["area_de"] for r in k["rows"]),
-                    " / ".join(r["rando_de"] for r in k["rows"]), " / ".join(r["rando_en"] for r in k["rows"]),
+                   (vid, k["key"], k["name"], " / ".join(gebiete), "", " / ".join(gegner),
                     json.dumps(kand, ensure_ascii=False), k["start"], k["ende"], round(k["score"], 3), k["treffer"]))
-        print(f"{hms(k['start'])}  {r0['de']}  →  Randomizer: {' / '.join(r['rando_de'] for r in k['rows'])}"
+        print(f"{hms(k['start'])}  Leiste: {k['name']}"
               + (f"   {zeit_link(tid, k['start'] - LINK_VORLAUF)}" if tid else ""))
+        for c in kand:
+            print("      mögliche Deutung:", deutung_text(c))
     db.commit()
     print(f"{len(kaempfe)} Kämpfe gespeichert.")
 
@@ -301,9 +334,10 @@ def zeilen_aus_db(db):
                         " k.rando_en, k.start_s, k.konfidenz, k.kandidaten FROM kaempfe k"
                         " JOIN videos v ON v.id=k.video_id ORDER BY v.streamer, v.id, k.start_s"):
         s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand = r
+        kand = json.loads(kand)
         out.append({"streamer": s, "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
-                    "gebiet": gebiet, "rando_de": rd, "rando_en": re_, "start_s": int(start),
-                    "konfidenz": konf, "mehrdeutig": len(json.loads(kand)) > 1,
+                    "gebiet": gebiet, "gegner": re_, "start_s": int(start), "konfidenz": konf,
+                    "deutungen": [deutung_text(dict(c, anzeige=boss)) for c in kand],
                     "link": zeit_link(tid, start - LINK_VORLAUF) if tid else None})
     return out
 
@@ -320,8 +354,10 @@ def export(a):
 def suche(a):
     t = norm(a.text)
     for z in zeilen_aus_db(db_oeffnen(a.db)):
-        if t in norm(" ".join(str(v) for v in (z["streamer"], z["boss"], z["gebiet"], z["rando_de"], z["rando_en"]))):
-            print(f"{z['streamer']:<16} {z['boss']:<28} → {z['rando_de']:<28} {z['link'] or hms(z['start_s'])}")
+        if t in norm(" ".join([z["streamer"], z["boss"], z["gebiet"], z["gegner"]] + z["deutungen"])):
+            print(f"{z['streamer']:<16} {z['boss']:<28} {z['link'] or hms(z['start_s'])}")
+            for d in z["deutungen"]:
+                print("      ", d)
 
 
 def main():

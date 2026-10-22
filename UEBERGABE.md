@@ -9,8 +9,9 @@ Für eine neue Sitzung. Zuerst `README.md` und `dsrarchive.py` lesen. Antworten 
 - Die Sitzung läuft in einer Linux-Umgebung ohne Zugriff auf Twitch; Windows-Programme laufen nicht dort. Ausführen auf seinem PC macht er selbst.
 
 ## Stand
+- Wichtig (von Matthias bestätigt): Der Randomizer ändert bei manchen Ersetzungen den Namen an der Leiste mit. Beobachtet: Taurus-Dämon-Platz → Leiste „Taurus Demon", Gegner Gargoyle; Asylum-Dämon-Platz → Leiste „Pinwheel", Gegner Pinwheel. Das Programm speichert den gelesenen Namen und alle Deutungen (Platz oder Ersatz-Gegner). Regel dafür offen, nach ihr fragen bzw. aus mehr Daten ableiten.
 - `dsrarchive.py`: `scan` (Datei oder Adresse, Stichproben, Leistensuche, Startzeit verfeinern), `export`, `suche`; SQLite `daten/archiv.db`; Suchseite `docs/index.html` liest `docs/kaempfe.json`.
-- Echter Test am 22.10.: Twitch-Video 2906825248 (KNiSTER), Ausschnitt ab 3:30:00, 720p: Seath-Platz erkannt (→ Ritter Artorias), Start 3:31:34, keine Fehltreffer.
+- Echter Test am 22.10.: Twitch-Video 2906825248 (KNiSTER), Ausschnitt ab 3:30:00, 720p: Seath-Platz erkannt (→ Ritter Artorias), Start 3:31:34, keine Fehltreffer. Zweiter Test: LillyTheChilly 2906737076, Ausschnitt ab 1:02:00: Pinwheel-Kampf ab 1:04:24 gefunden, sonst keine Kämpfe im Ausschnitt (laut Matthias ist dort sonst kein Boss).
 - Getestet außerdem an künstlichen 720p/1080p-Videos aus drei Original-Screenshots (Taurus Demon, Pinwheel, Chaos Witch Quelaag): 3 von 3 Kämpfen, Start auf die Sekunde. Mit echten Videos noch nicht.
 
 ## Offen
