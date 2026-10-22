@@ -445,9 +445,7 @@ def scan(a):
     t0 = time.time()
     bereiche = None
     if kapitel and not a.ganzes_video:
-        rx = re.compile(a.kapitel, re.I)
-        bereiche = [(max(0, k["start_time"]), min(dauer, k["end_time"])) for k in kapitel if rx.search(k.get("title") or "")]
-        bereiche = [x for x in bereiche if x[1] - x[0] >= 60]
+        bereiche = spiel_abschnitte(kapitel, a.kapitel, dauer)
         if not bereiche:
             print("  Kein Kapitel mit Dark Souls Remastered, Video übersprungen (--ganzes-video wertet trotzdem aus).")
             return
@@ -585,6 +583,23 @@ def liste_parsen(text):
     return out
 
 
+def kapitel_von(url):
+    """Kapitel (Spielwechsel) eines Twitch-Videos von yt-dlp oder None."""
+    r = subprocess.run(["yt-dlp", "--skip-download", "--print", "%(chapters)j", url], capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1]) or None
+    except (ValueError, IndexError):
+        return None
+
+
+def spiel_abschnitte(kapitel, muster, dauer=0):
+    """Abschnitte (von, bis) der Kapitel, deren Titel zum Muster passt, mindestens 60 s lang."""
+    rx = re.compile(muster, re.I)
+    ab = [(max(0, k["start_time"]), min(dauer, k["end_time"]) if dauer else k["end_time"])
+          for k in kapitel if rx.search(k.get("title") or "")]
+    return [x for x in ab if x[1] - x[0] >= 60]
+
+
 def scan_kanal(a):
     """Wertet die letzten Aufzeichnungen eines Kanals nacheinander aus."""
     videos = kanal_liste(a.kanal)
@@ -595,7 +610,15 @@ def scan_kanal(a):
     videos = videos[:a.max]
     print(f"{len(videos)} Videos von {a.kanal}:")
     for v in videos:
-        print(f"  {hms(v['dauer'])}  {v['titel'][:70]}  {v['url']}")
+        zusatz = ""
+        if a.nur_liste:
+            kap = kapitel_von(v["url"])
+            if not kap:
+                zusatz = "  [keine Kapitel-Angaben]"
+            else:
+                ab = spiel_abschnitte(kap, a.kapitel, v["dauer"])
+                zusatz = ("  [Dark Souls: " + hms(sum(y - x for x, y in ab)) + "]") if ab else "  [kein Dark Souls]"
+        print(f"  {hms(v['dauer'])}  {v['titel'][:70]}  {v['url']}{zusatz}")
     if a.nur_liste:
         return
     for i, v in enumerate(videos, 1):
