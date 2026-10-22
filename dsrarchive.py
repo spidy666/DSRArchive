@@ -654,16 +654,18 @@ def scan_kanal(a):
 
 def scan_kanaele(a):
     """Wertet die Kanäle aus einer Textdatei (kanaele.txt) nacheinander aus."""
-    kanaele = []
+    kanaele = []   # (Name, eigenes Limit oder None); Zeile: "name" oder "name 100"
     for z in open(a.datei, encoding="utf-8"):
-        z = z.split("#")[0].strip()
-        if z:
-            kanaele.append(z)
+        teile = z.split("#")[0].split()
+        if teile:
+            kanaele.append((teile[0], int(teile[1]) if len(teile) > 1 and teile[1].isdigit() else None))
     print(f"{len(kanaele)} Kanäle aus {a.datei}")
-    for k in kanaele:
-        print(f"\n##### Kanal {k}")
+    for k, limit in kanaele:
+        print(f"\n##### Kanal {k}" + (f" (bis zu {limit} Videos)" if limit else ""))
         b = argparse.Namespace(**vars(a))
         b.kanal = k
+        if limit:
+            b.max = limit
         try:
             scan_kanal(b)
         except SystemExit as e:

@@ -1,17 +1,18 @@
-# Twitch-Kanäle für `scan-kanaele`. Eine Zeile pro Kanal, Name wie in der Adresse (twitch.tv/NAME).
+# Twitch-Kanäle für `scan-kanaele`, in dieser Reihenfolge. Eine Zeile pro Kanal: Name wie in der
+# Adresse (twitch.tv/NAME), optional dahinter ein eigenes Limit für die Videozahl (sonst gilt --max).
 # Text nach # ist Kommentar.
+knister 100     # wichtig, viel herausgefunden
+suuN 100        # wichtig, viel herausgefunden
 H0llyLP
 falganwow
 donnie_oh
-# edopeh      # hat noch kein Dark Souls gestreamt (Stand 22.10.2026), später wieder einschalten
 guppa
 kadditv
-bonjwa      # zwei Streamer auf einem Kanal, als Streamer gilt der Kanalname
+bonjwa          # zwei Streamer auf einem Kanal, als Streamer gilt der Kanalname
 maxim
 sunglitters
-suuN
 pietsmiet
 handofblood
 mahluna
 LillyTheChilly
-knister
+# edopeh        # hat noch kein Dark Souls gestreamt (Stand 22.10.2026), später wieder einschalten
