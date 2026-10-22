@@ -554,11 +554,17 @@ def export(a):
 
 def suche(a):
     t = norm(a.text)
+    zeilen = []
     for z in zeilen_aus_db(db_oeffnen(a.db)):
         if t in norm(" ".join([z["streamer"], z["boss"], z["gebiet"], z["gegner"]] + z["deutungen"])):
-            print(f"{z['streamer']:<12} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
-            for d in z["deutungen"]:
-                print("      ", d)
+            zeilen.append(f"{z['streamer']:<12} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
+            zeilen += ["       " + d for d in z["deutungen"]]
+    if a.out:   # direkt als UTF-8-Datei (die Umleitung > schreibt unter Windows in cp1252 und scheitert an Sonderzeichen)
+        with open(a.out, "w", encoding="utf-8") as f:
+            f.write("\n".join(zeilen) + "\n")
+        print(f"{len(zeilen)} Zeilen nach {a.out} geschrieben.")
+    else:
+        print("\n".join(zeilen))
 
 
 def kanal_liste(kanal):
@@ -718,7 +724,13 @@ def main():
     b.set_defaults(f=bereinigen)
     q = sub.add_parser("suche")
     q.add_argument("text")
+    q.add_argument("--out", help="Ergebnis in diese Datei schreiben (UTF-8)")
     q.set_defaults(f=suche)
+    for strom in (sys.stdout, sys.stderr):   # Windows-Konsole: Sonderzeichen wie → nicht abstürzen lassen
+        try:
+            strom.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     a = p.parse_args()
     try:
         a.f(a)
