@@ -67,14 +67,26 @@ def lade_namen(pfad, deutsch=False):
                                 "pts": r["pts"], "original": r["en"], "original_de": r["de"],
                                 "rando_de": r["rando_de"], "rando_en": r["rando_en"]})
 
-    for r in json.load(open(pfad, encoding="utf-8")):
-        eintrag(r["en"], "platz", r)
-        for z in ZUSATZNAMEN.get(r["key"], []):
-            eintrag(z, "platz", r)
-        eintrag(r["rando_en"], "ersatz", r)
+    daten = json.load(open(pfad, encoding="utf-8"))
+    # Plätze mit 3 Punkten sind Mini-Bosse und normale Gegner ohne Namensleiste (laut Matthias).
+    # Ihr Platzname steht nie an einer Leiste (Fehltreffer aus Menü- und Chattext, z. B. "Black Knight 1").
+    # Als Ersatz-Gegner zählen sie nur, wenn dort ein echter Boss steht (Hydra-Platz mit Gaping Dragon).
+    bosse = {norm(r["en"]) for r in daten if r["pts"] >= 5}
+    for z in ZUSATZNAMEN.values():
+        bosse |= {norm(x) for x in z}
+    for r in daten:
+        boss_platz = r["pts"] >= 5
+        if boss_platz:
+            eintrag(r["en"], "platz", r)
+            for z in ZUSATZNAMEN.get(r["key"], []):
+                eintrag(z, "platz", r)
+        if boss_platz or norm(r["rando_en"]) in bosse:
+            eintrag(r["rando_en"], "ersatz", r)
         if deutsch:
-            eintrag(r["de"], "platz", r)
-            eintrag(r["rando_de"], "ersatz", r)
+            if boss_platz:
+                eintrag(r["de"], "platz", r)
+            if boss_platz or norm(r["rando_en"]) in bosse:
+                eintrag(r["rando_de"], "ersatz", r)
     return namen
 
 
