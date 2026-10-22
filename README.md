@@ -7,7 +7,7 @@ Grundlage: Im Randomizer zeigt die Lebensleiste den Namen des **Original-Platzes
 ## Voraussetzungen
 - Python 3 und Pillow: `pip install -r requirements.txt`
 - `ffmpeg` und `ffprobe` im PATH
-- `tesseract` im PATH, für deutschen Spieltext zusätzlich die Sprachdatei `deu` (`--lang eng+deu`)
+- `tesseract` im PATH (Sprachdatei `eng`). Der Spieltext der Streams ist englisch. Für deutschen Text: Sprachdatei `deu` installieren und `--lang eng+deu --auch-deutsch` angeben
 - `yt-dlp` nur, wenn Twitch-Adressen direkt ausgewertet werden
 
 ## Benutzung
@@ -24,7 +24,7 @@ python dsrarchive.py export
 - Die Datenbank liegt in `daten/archiv.db` (nicht im Repo). `export` schreibt `docs/kaempfe.json`, die Suchseite `docs/index.html` liest diese Datei.
 
 ## So funktioniert die Erkennung
-Aus dem unteren Teil des Bildes (ab 55 % der Höhe) wird alle N Sekunden ein Bild geholt. Tesseract liest den Text mit drei Bildfiltern, der beste Treffer gegen die Bossnamen (deutsch und englisch, unscharfer Vergleich, auch Namensanfänge wie „Chaos Witch“) gewinnt. Es gibt keinen festen Ausschnitt, die Namensleiste wird im Bild gesucht.
+Aus dem unteren Teil des Bildes (ab 55 % der Höhe) wird alle N Sekunden ein Bild geholt. Tesseract liest den Text mit drei Bildfiltern, der beste Treffer gegen die englischen Bossnamen (unscharfer Vergleich, auch Namensanfänge wie „Chaos Witch“) gewinnt. Es gibt keinen festen Ausschnitt, die Namensleiste wird im Bild gesucht.
 
 ## Stand und Grenzen
 Getestet an künstlichen Videos (720p und 1080p), die aus drei echten Screenshots zusammengesetzt sind: alle drei Kämpfe gefunden, Startzeit auf die Sekunde. Mit echten Videos noch nicht.

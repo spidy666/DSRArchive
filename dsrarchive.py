@@ -39,11 +39,11 @@ def norm(s):
     return " ".join(re.sub(r"[^a-z0-9 ]+", " ", s).split())
 
 
-def lade_namen(pfad):
-    """norm. Name (Original DE/EN) -> Liste der Plätze, die so heißen."""
+def lade_namen(pfad, deutsch=False):
+    """norm. Name (Original, standardmäßig nur Englisch) -> Liste der Plätze, die so heißen."""
     namen = {}
     for r in json.load(open(pfad, encoding="utf-8")):
-        for n in (r["de"], r["en"]):
+        for n in ((r["de"], r["en"]) if deutsch else (r["en"],)):
             if n:
                 namen.setdefault(norm(n), []).append(r)
     return namen
@@ -251,7 +251,7 @@ def quelle_aufloesen(quelle, a):
 
 
 def scan(a):
-    namen = lade_namen(a.namen)
+    namen = lade_namen(a.namen, a.auch_deutsch)
     db = db_oeffnen(a.db)
     src, streamer, titel, tid = quelle_aufloesen(a.quelle, a)
     alt = db.execute("SELECT id FROM videos WHERE quelle=?", (a.quelle,)).fetchone()
@@ -336,7 +336,8 @@ def main():
     s.add_argument("--versatz", type=int, default=0,
                    help="Sekunden, bei denen ein heruntergeladener Ausschnitt im Gesamtvideo beginnt")
     s.add_argument("--modus", default="randomizer")
-    s.add_argument("--lang", default="eng")
+    s.add_argument("--lang", default="eng", help="Tesseract-Sprache, bei deutschem Spieltext eng+deu")
+    s.add_argument("--auch-deutsch", action="store_true", help="auch mit den deutschen Bossnamen vergleichen")
     s.add_argument("--intervall", type=int, default=20, help="Sekunden zwischen den Stichproben")
     s.add_argument("--luecke", type=int, default=90, help="Sekunden ohne Treffer, bis ein Kampf als beendet gilt")
     s.add_argument("--schwelle", type=float, default=0.85)
