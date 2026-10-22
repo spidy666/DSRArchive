@@ -674,6 +674,19 @@ def scan_optionen(s):
     s.add_argument("--ganzes-video", action="store_true", help="Kapitel ignorieren, das ganze Video auswerten")
 
 
+def bereinigen(a):
+    """Entfernt Einträge von lokalen Test-Dateien (Quelle ist keine Twitch-Adresse). Sie würden sonst
+    neben dem späteren Gesamtlauf desselben Videos doppelt erscheinen."""
+    db = db_oeffnen(a.db)
+    alt = db.execute("SELECT id, quelle FROM videos WHERE quelle NOT LIKE 'http%'").fetchall()
+    for vid, q in alt:
+        n = db.execute("DELETE FROM kaempfe WHERE video_id=?", (vid,)).rowcount
+        db.execute("DELETE FROM videos WHERE id=?", (vid,))
+        print(f"entfernt: {q} ({n} Kämpfe)")
+    db.commit()
+    print(f"{len(alt)} Quellen entfernt.")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--db", default=os.path.join(HIER, "daten", "archiv.db"))
@@ -701,6 +714,8 @@ def main():
     e = sub.add_parser("export")
     e.add_argument("--out", default=os.path.join(HIER, "docs", "kaempfe.json"))
     e.set_defaults(f=export)
+    b = sub.add_parser("bereinigen", help="Einträge von lokalen Test-Dateien entfernen")
+    b.set_defaults(f=bereinigen)
     q = sub.add_parser("suche")
     q.add_argument("text")
     q.set_defaults(f=suche)
