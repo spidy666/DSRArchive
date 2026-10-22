@@ -14,9 +14,12 @@ Grundlage: Die Lebensleiste zeigt im Randomizer **nicht immer denselben Namen**.
 ```
 python dsrarchive.py scan "video.mp4" --streamer Name --twitch-id 1234567890
 python dsrarchive.py scan "https://www.twitch.tv/videos/1234567890"
+python dsrarchive.py scan-kanal HollyLP --max 5 --nur-liste
+python dsrarchive.py scan-kanal HollyLP --max 5 --titel-filter "dldu|rando"
 python dsrarchive.py suche gargoyle
 python dsrarchive.py export
 ```
+- `scan-kanal`: holt die Liste der Aufzeichnungen eines Kanals mit yt-dlp (ohne Twitch-Zugangsdaten), neueste zuerst, und wertet sie nacheinander aus. `--max` begrenzt die Anzahl, `--titel-filter` wählt nach Titel aus (die Kategorie eines Videos liefert die Liste nicht sicher mit), `--min-dauer` (Standard 20 Minuten) überspringt kurze Videos, `--nur-liste` zeigt nur die Auswahl. Schon eingetragene Videos werden übersprungen, mit Strg+C abgebrochene Läufe behalten die fertigen Videos. Noch nicht an einem echten Kanal getestet.
 - Bei einer Twitch-Adresse werden Streamer, Titel und ID automatisch ermittelt (yt-dlp). Bei Dateien wird die ID aus dem Dateinamen gelesen, wenn er `[v1234567890]` enthält (so benennt yt-dlp), sonst mit `--twitch-id` angeben.
 - `--versatz 12600`: Sekunde im Gesamtvideo, bei der ein heruntergeladener Ausschnitt beginnt (damit die Links stimmen).
 - `--intervall 30`: Sekunden zwischen den Stichproben (Standard 30). Der Start eines Kampfes wird danach durch Halbieren des Zeitfensters auf etwa 2 Sekunden genau bestimmt.

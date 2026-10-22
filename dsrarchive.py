@@ -421,11 +421,11 @@ def scan(a):
     LEISTENPRUEFUNG = not a.ohne_leistenpruefung
     namen = lade_namen(a.namen, a.auch_deutsch)
     db = db_oeffnen(a.db)
-    src, streamer, titel, tid = quelle_aufloesen(a.quelle, a)
     alt = db.execute("SELECT id FROM videos WHERE quelle=?", (a.quelle,)).fetchone()
     if alt and not a.neu:
         print("Schon in der Datenbank, übersprungen (--neu zum erneuten Auswerten).")
         return
+    src, streamer, titel, tid = quelle_aufloesen(a.quelle, a)
     if alt:
         db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
         db.execute("DELETE FROM videos WHERE id=?", alt)
@@ -541,12 +541,55 @@ def suche(a):
                 print("      ", d)
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--db", default=os.path.join(HIER, "daten", "archiv.db"))
-    sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("scan")
-    s.add_argument("quelle")
+def kanal_liste(kanal):
+    """Die Aufzeichnungen (VODs) eines Kanals, neueste zuerst: [{url, titel, dauer}].
+    Nutzt yt-dlp, es sind keine Twitch-Zugangsdaten nötig."""
+    name = kanal.rstrip("/").split("/")[-1] if kanal.startswith("http") else kanal
+    url = f"https://www.twitch.tv/{name}/videos?filter=archives&sort=time"
+    r = subprocess.run(["yt-dlp", "--flat-playlist", "-J", url], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit("yt-dlp konnte die Videoliste nicht holen:\n" + r.stderr[-400:])
+    return liste_parsen(r.stdout)
+
+
+def liste_parsen(text):
+    out = []
+    for e in json.loads(text).get("entries") or []:
+        url = e.get("url") or e.get("webpage_url") or ""
+        if not url.startswith("http") and e.get("id"):
+            url = f"https://www.twitch.tv/videos/{str(e['id']).lstrip('v')}"
+        if url:
+            out.append({"url": url, "titel": e.get("title") or "", "dauer": e.get("duration") or 0})
+    return out
+
+
+def scan_kanal(a):
+    """Wertet die letzten Aufzeichnungen eines Kanals nacheinander aus."""
+    videos = kanal_liste(a.kanal)
+    if a.titel_filter:
+        rx = re.compile(a.titel_filter, re.I)
+        videos = [v for v in videos if rx.search(v["titel"])]
+    videos = [v for v in videos if not v["dauer"] or v["dauer"] >= a.min_dauer * 60]
+    videos = videos[:a.max]
+    print(f"{len(videos)} Videos von {a.kanal}:")
+    for v in videos:
+        print(f"  {hms(v['dauer'])}  {v['titel'][:70]}  {v['url']}")
+    if a.nur_liste:
+        return
+    for i, v in enumerate(videos, 1):
+        print(f"\n=== Video {i} von {len(videos)}: {v['titel'][:70]}")
+        b = argparse.Namespace(**vars(a))
+        b.quelle, b.streamer, b.titel, b.twitch_id = v["url"], None, None, None
+        try:
+            scan(b)
+        except SystemExit as e:
+            print(f"  übersprungen: {e}", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("\nAbgebrochen. Fertig ausgewertete Videos bleiben gespeichert.")
+            return
+
+
+def scan_optionen(s):
     s.add_argument("--streamer")
     s.add_argument("--titel")
     s.add_argument("--twitch-id")
@@ -563,7 +606,24 @@ def main():
     s.add_argument("--ohne-leistenpruefung", action="store_true",
                    help="auch Namen zählen, unter denen keine rote Lebensleiste liegt (z. B. bei Farbfiltern im Stream)")
     s.add_argument("--neu", action="store_true", help="schon vorhandenes Video erneut auswerten")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--db", default=os.path.join(HIER, "daten", "archiv.db"))
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("scan")
+    s.add_argument("quelle")
+    scan_optionen(s)
     s.set_defaults(f=scan)
+    k = sub.add_parser("scan-kanal", help="letzte Aufzeichnungen eines Twitch-Kanals auswerten")
+    k.add_argument("kanal", help="Kanalname oder Adresse")
+    k.add_argument("--max", type=int, default=5, help="höchstens so viele Videos (neueste zuerst)")
+    k.add_argument("--titel-filter", help="nur Videos, deren Titel zu diesem Ausdruck passt (z. B. 'dldu|rando')")
+    k.add_argument("--min-dauer", type=int, default=20, help="Videos unter so vielen Minuten überspringen")
+    k.add_argument("--nur-liste", action="store_true", help="nur die Videoliste zeigen, nichts auswerten")
+    scan_optionen(k)
+    k.set_defaults(f=scan_kanal)
     e = sub.add_parser("export")
     e.add_argument("--out", default=os.path.join(HIER, "docs", "kaempfe.json"))
     e.set_defaults(f=export)
