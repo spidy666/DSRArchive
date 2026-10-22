@@ -1,0 +1,10 @@
+# Datenbank und Zwischenstände bleiben lokal, veröffentlicht wird docs/kaempfe.json
+daten/
+*.db
+__pycache__/
+# Videos und Bilder (Screenshots zeigen Chatnamen)
+*.mp4
+*.mkv
+*.ts
+*.png
+*.jpg

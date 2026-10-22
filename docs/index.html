@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSR-Archiv – Bosse in Streams finden</title>
+<style>
+  :root { --bg:#14120f; --card:#1d1a15; --text:#e9e2d0; --dim:#9b937f; --gold:#d9b45f; --line:#352f25; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f2e8; --card:#fffdf7; --text:#2a251b; --dim:#6f6753; --gold:#8a6414; --line:#ddd3bd; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui,sans-serif; }
+  main { max-width:1000px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:1.4rem; margin:0 0 4px; color:var(--gold); }
+  .sub { color:var(--dim); margin:0 0 16px; font-size:.9rem; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  input, select { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:9px 10px; font:inherit; }
+  input { flex:1 1 240px; }
+  select { flex:0 1 200px; }
+  .anz { color:var(--dim); font-size:.85rem; margin:6px 0 10px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); cursor:pointer; user-select:none; }
+  tr:last-child td { border-bottom:0; }
+  a { color:var(--gold); }
+  .klein { color:var(--dim); font-size:.82rem; }
+  .mehr { color:var(--gold); font-size:.78rem; }
+  @media (max-width:640px) {
+    table, tbody, tr, td { display:block; }
+    thead { display:none; }
+    tr { border-bottom:1px solid var(--line); padding:8px 0; }
+    td { border:0; padding:2px 10px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>DSR-Archiv</h1>
+  <p class="sub">Bosskämpfe in Dark-Souls-Remastered-Randomizer-Streams. Gesucht wird nach dem Namen an der Lebensleiste, das ist der Original-Platz. Rechts steht der Gegner, der dort im Randomizer steht.</p>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Suche: Boss, Randomizer-Gegner, Streamer, Gebiet …" autofocus>
+    <select id="streamer"><option value="">Alle Streamer</option></select>
+    <select id="gebiet"><option value="">Alle Gebiete</option></select>
+  </div>
+  <div class="anz" id="anz"></div>
+  <table>
+    <thead><tr><th data-k="streamer">Streamer</th><th data-k="boss">Boss an der Leiste</th><th data-k="rando_de">Randomizer</th><th data-k="gebiet">Gebiet</th><th>Video</th></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+  <p class="sub" id="stand"></p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var daten = [], sortKey = "streamer";
+  var $ = function (id) { return document.getElementById(id); };
+  // Umlaute und Groß-/Kleinschreibung ignorieren
+  function norm(s) { return String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
+  function zeit(s) { var h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); }
+  function td(tr, text) { var c = document.createElement("td"); c.textContent = text; tr.appendChild(c); return c; }
+
+  function fuellen(sel, werte) {
+    werte.sort().forEach(function (w) { var o = document.createElement("option"); o.value = w; o.textContent = w; sel.appendChild(o); });
+  }
+
+  function zeigen() {
+    var q = norm($("q").value), s = $("streamer").value, g = $("gebiet").value;
+    var liste = daten.filter(function (d) {
+      if (s && d.streamer !== s) return false;
+      if (g && d.gebiet.split(" / ").indexOf(g) < 0) return false;
+      return !q || norm([d.streamer, d.boss, d.gebiet, d.rando_de, d.rando_en, d.titel].join(" ")).indexOf(q) >= 0;
+    }).sort(function (a, b) { return String(a[sortKey]).localeCompare(String(b[sortKey]), "de") || a.start_s - b.start_s; });
+    var body = $("body"); body.textContent = "";
+    liste.forEach(function (d) {
+      var tr = document.createElement("tr");
+      td(tr, d.streamer);
+      td(tr, d.boss);
+      var rc = td(tr, d.rando_de);
+      if (d.mehrdeutig) { var m = document.createElement("div"); m.className = "mehr"; m.textContent = "mehrere Plätze mit diesem Namen"; rc.appendChild(m); }
+      td(tr, d.gebiet);
+      var v = document.createElement("td");
+      if (d.link && /^https:\/\/www\.twitch\.tv\//.test(d.link)) {
+        var a = document.createElement("a"); a.href = d.link; a.target = "_blank"; a.rel = "noopener noreferrer";
+        a.textContent = "ab " + zeit(d.start_s); v.appendChild(a);
+      } else { v.textContent = zeit(d.start_s); }
+      tr.appendChild(v); body.appendChild(tr);
+    });
+    $("anz").textContent = liste.length + " von " + daten.length + " Kämpfen";
+  }
+
+  fetch("kaempfe.json").then(function (r) { return r.json(); }).then(function (j) {
+    daten = j.kaempfe || [];
+    fuellen($("streamer"), Array.from(new Set(daten.map(function (d) { return d.streamer; }))));
+    var gebiete = new Set(); daten.forEach(function (d) { d.gebiet.split(" / ").forEach(function (x) { gebiete.add(x); }); });
+    fuellen($("gebiet"), Array.from(gebiete));
+    $("stand").textContent = "Stand: " + (j.stand || "unbekannt") + ". Die Treffer stammen aus automatischer Texterkennung und können Fehler enthalten. Twitch löscht alte Videos, einzelne Links können ins Leere führen.";
+    zeigen();
+  }).catch(function () { $("anz").textContent = "Daten konnten nicht geladen werden."; });
+
+  $("q").addEventListener("input", zeigen); $("streamer").addEventListener("change", zeigen); $("gebiet").addEventListener("change", zeigen);
+  document.querySelectorAll("th[data-k]").forEach(function (th) { th.addEventListener("click", function () { sortKey = th.dataset.k; zeigen(); }); });
+})();
+</script>
+</body>
+</html>
