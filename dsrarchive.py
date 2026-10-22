@@ -630,8 +630,8 @@ def scan_kanal(a):
         except SystemExit as e:
             print(f"  übersprungen: {e}", file=sys.stderr)
         except KeyboardInterrupt:
-            print("\nAbgebrochen. Fertig ausgewertete Videos bleiben gespeichert.")
-            return
+            print("\nAbgebrochen. Fertig ausgewertete Videos bleiben gespeichert, das laufende Video nicht.")
+            raise
 
 
 def scan_kanaele(a):
@@ -705,7 +705,10 @@ def main():
     q.add_argument("text")
     q.set_defaults(f=suche)
     a = p.parse_args()
-    a.f(a)
+    try:
+        a.f(a)
+    except KeyboardInterrupt:
+        sys.exit(130)
 
 
 if __name__ == "__main__":
