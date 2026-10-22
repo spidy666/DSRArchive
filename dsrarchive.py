@@ -694,6 +694,78 @@ def scan_optionen(s):
     s.add_argument("--ganzes-video", action="store_true", help="Kapitel ignorieren, das ganze Video auswerten")
 
 
+def ende_bestimmen(src, w, h, namen, sprache, schwelle, key, letzter, spanne=30):
+    """Genaues Ende eines Kampfes: `letzter` ist ein Zeitpunkt mit Namen an der Leiste, nach `spanne`
+    Sekunden war er weg. Durch Halbieren wird der letzte Zeitpunkt mit Namen auf etwa 2 s bestimmt."""
+    lo, hi = letzter, letzter + spanne
+    while hi - lo > 2:
+        mitte = (lo + hi) / 2
+        img = bild_bei(src, w, h, mitte)
+        hit = finde_namen(img, namen, sprache, schwelle) if img else None
+        if hit and hit["key"] == key:
+            lo = mitte
+        else:
+            hi = mitte
+    return lo
+
+
+def dateiname(text):
+    return re.sub(r'[<>:"/\\|?*]+', "_", text).strip(" .") or "unbekannt"
+
+
+def clips(a):
+    """Lädt jeden Kampf aus der Datenbank als Ausschnitt in 720p (private Sicherung, bevor Twitch das
+    Video löscht). Das Ende wird dabei genau bestimmt. Schon vorhandene Dateien werden übersprungen."""
+    global LEISTENPRUEFUNG
+    LEISTENPRUEFUNG = True
+    namen = lade_namen(a.namen)
+    db = db_oeffnen(a.db)
+    zeilen = db.execute("SELECT v.quelle, v.streamer, v.twitch_id, k.boss, k.platz, k.start_s, k.ende_s "
+                        "FROM kaempfe k JOIN videos v ON v.id=k.video_id WHERE v.quelle LIKE 'http%' "
+                        "ORDER BY v.id, k.start_s").fetchall()
+    if a.streamer:
+        zeilen = [z for z in zeilen if a.streamer.lower() in z[1].lower()]
+    if a.boss:
+        zeilen = [z for z in zeilen if norm(a.boss) in norm(z[3])]
+    geplant = []
+    for quelle, streamer, tid, boss, key, start, ende in zeilen:
+        sek = int(start) - a.vor
+        pfad = os.path.join(a.ziel, dateiname(streamer), dateiname(boss),
+                            f"{dateiname(streamer)} - {dateiname(boss)} - {tid} - {hms(max(0, sek)).replace(':', '-')}.mp4")
+        if not os.path.exists(pfad):
+            geplant.append((quelle, streamer, tid, boss, key, start, ende, pfad))
+    print(f"{len(zeilen)} Kämpfe in der Datenbank, {len(geplant)} noch ohne Clip.")
+    if a.nur_planen:
+        for g in geplant[:a.max or None]:
+            print(f"  {g[1]:<14} {g[3]:<26} {hms(g[5])}–{hms(g[6])}  {g[2]}")
+        return
+    quellen = {}
+    fertig = 0
+    for quelle, streamer, tid, boss, key, start, ende, pfad in geplant:
+        if a.max and fertig >= a.max:
+            break
+        try:
+            if quelle not in quellen:
+                args = argparse.Namespace(streamer=None, titel=None, twitch_id=None, hoehe=480)
+                src = quelle_aufloesen(quelle, args)[0]
+                quellen[quelle] = (src,) + video_info(src)[:2]
+            src, w, h = quellen[quelle]
+            ende_neu = ende_bestimmen(src, w, h, namen, "eng", 0.85, key, ende)
+            von, bis = max(0, int(start) - a.vor), int(ende_neu) + a.nach
+            os.makedirs(os.path.dirname(pfad), exist_ok=True)
+            print(f"{streamer} {boss} {hms(von)}–{hms(bis)} (Ende bestimmt: {hms(ende_neu)}, davor {hms(ende)})")
+            r = subprocess.run(["yt-dlp", "-f", f"best[height<={a.hoehe}]/best", "--download-sections", f"*{von}-{bis}",
+                                "-o", pfad, "--no-progress", quelle], capture_output=True, text=True)
+            if r.returncode or not os.path.exists(pfad):
+                print("   Fehler:", (r.stderr or r.stdout)[-300:].strip(), file=sys.stderr)
+            else:
+                fertig += 1
+                print(f"   gespeichert: {pfad} ({os.path.getsize(pfad) / 1e6:.0f} MB)")
+        except SystemExit as e:
+            print(f"   übersprungen: {e}", file=sys.stderr)
+    print(f"{fertig} Clips gespeichert.")
+
+
 def bereinigen(a):
     """Entfernt Einträge von lokalen Test-Dateien (Quelle ist keine Twitch-Adresse). Sie würden sonst
     neben dem späteren Gesamtlauf desselben Videos doppelt erscheinen."""
@@ -734,6 +806,17 @@ def main():
     e = sub.add_parser("export")
     e.add_argument("--out", default=os.path.join(HIER, "docs", "kaempfe.json"))
     e.set_defaults(f=export)
+    c = sub.add_parser("clips", help="Kämpfe als Ausschnitte in 720p sichern (private Kopie)")
+    c.add_argument("--ziel", required=True, help="Zielordner, z. B. D:\\DSRClips")
+    c.add_argument("--hoehe", type=int, default=720)
+    c.add_argument("--vor", type=int, default=10, help="Sekunden vor dem Kampfbeginn")
+    c.add_argument("--nach", type=int, default=15, help="Sekunden nach dem Verschwinden der Leiste")
+    c.add_argument("--streamer", help="nur Kämpfe dieses Streamers")
+    c.add_argument("--boss", help="nur Kämpfe mit diesem Namen an der Leiste")
+    c.add_argument("--max", type=int, default=0, help="höchstens so viele Clips in diesem Lauf (zum Testen)")
+    c.add_argument("--nur-planen", action="store_true", help="nur zeigen, was geladen würde")
+    c.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
+    c.set_defaults(f=clips)
     b = sub.add_parser("bereinigen", help="Einträge von lokalen Test-Dateien entfernen")
     b.set_defaults(f=bereinigen)
     q = sub.add_parser("suche")
