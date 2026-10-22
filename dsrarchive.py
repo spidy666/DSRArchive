@@ -41,6 +41,11 @@ def norm(s):
     return " ".join(re.sub(r"[^a-z0-9 ]+", " ", s).split())
 
 
+# Plätze, an deren Leiste andere Namen stehen als im Listeneintrag. Anor Londo ist in der Liste
+# ein gemeinsamer Eintrag, an der Leiste stehen aber zwei einzelne Namen.
+ZUSATZNAMEN = {"11-1": ["Dragon Slayer Ornstein", "Executioner Smough"]}
+
+
 def lade_namen(pfad, deutsch=False):
     """norm. Name -> {"anzeige": Name, "kandidaten": [...]}.
 
@@ -63,6 +68,8 @@ def lade_namen(pfad, deutsch=False):
 
     for r in json.load(open(pfad, encoding="utf-8")):
         eintrag(r["en"], "platz", r)
+        for z in ZUSATZNAMEN.get(r["key"], []):
+            eintrag(z, "platz", r)
         eintrag(r["rando_en"], "ersatz", r)
         if deutsch:
             eintrag(r["de"], "platz", r)
@@ -419,7 +426,7 @@ def scan(a):
                    "start_s,ende_s,konfidenz,treffer) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                    (vid, k["key"], k["name"], " / ".join(gebiete), "", " / ".join(gegner),
                     json.dumps(kand, ensure_ascii=False), k["start"], k["ende"], round(k["score"], 3), k["treffer"]))
-        print(f"{hms(k['start'])}  Leiste: {k['name']}"
+        print(f"{hms(k['start'])}–{hms(k['ende'])}  Leiste: {k['name']}  ({k['treffer']} Treffer)"
               + (f"   {zeit_link(tid, k['start'] - LINK_VORLAUF)}" if tid else ""))
         for c in kand:
             print("      mögliche Deutung:", deutung_text(c))
@@ -430,12 +437,13 @@ def scan(a):
 def zeilen_aus_db(db):
     out = []
     for r in db.execute("SELECT v.streamer, v.titel, v.twitch_id, v.modus, k.boss, k.gebiet, k.rando_de,"
-                        " k.rando_en, k.start_s, k.konfidenz, k.kandidaten FROM kaempfe k"
+                        " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer FROM kaempfe k"
                         " JOIN videos v ON v.id=k.video_id ORDER BY v.streamer, v.id, k.start_s"):
-        s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand = r
+        s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand, ende, treffer = r
         kand = json.loads(kand)
         out.append({"streamer": s, "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
-                    "gebiet": gebiet, "gegner": re_, "start_s": int(start), "konfidenz": konf,
+                    "gebiet": gebiet, "gegner": re_, "start_s": int(start), "ende_s": int(ende or start),
+                    "treffer": treffer, "konfidenz": konf,
                     "deutungen": [deutung_text(dict(c, anzeige=boss)) for c in kand],
                     "link": zeit_link(tid, start - LINK_VORLAUF) if tid else None})
     return out
@@ -454,7 +462,7 @@ def suche(a):
     t = norm(a.text)
     for z in zeilen_aus_db(db_oeffnen(a.db)):
         if t in norm(" ".join([z["streamer"], z["boss"], z["gebiet"], z["gegner"]] + z["deutungen"])):
-            print(f"{z['streamer']:<16} {z['boss']:<28} {z['link'] or hms(z['start_s'])}")
+            print(f"{z['streamer']:<12} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
             for d in z["deutungen"]:
                 print("      ", d)
 
