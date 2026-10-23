@@ -43,6 +43,9 @@ def norm(s):
 
 # Plätze, an deren Leiste andere Namen stehen als im Listeneintrag. Anor Londo ist in der Liste
 # ein gemeinsamer Eintrag, an der Leiste stehen aber zwei einzelne Namen.
+# Feste Zuordnung: dieser gelesene Name ist derselbe Kampf wie der rechts genannte
+# (vom Nutzer bestätigt: bei den Bell Gargoyles verdeckt oft die Webcam das "Bell", dann steht nur "Gargoyle" da).
+ALIAS = {"gargoyle": "bell gargoyle"}
 ZUSATZNAMEN = {"11-1": ["Dragon Slayer Ornstein", "Executioner Smough"],
                "2-4": ["Bell Gargoyle"]}   # an der Leiste steht die Einzahl (am Video belegt)
 
@@ -87,6 +90,9 @@ def lade_namen(pfad, deutsch=False):
                 eintrag(r["de"], "platz", r)
             if boss_platz or norm(r["rando_en"]) in bosse:
                 eintrag(r["rando_de"], "ersatz", r)
+    for von, nach in ALIAS.items():
+        if nach in namen:
+            namen[von] = namen[nach]
     return namen
 
 
@@ -851,6 +857,16 @@ def bereinigen(a):
         db.execute("DELETE FROM kaempfe WHERE id=?", (i,))
     if veraltet:
         print(f"{len(veraltet)} Kämpfe mit nicht mehr gültigem Namen entfernt: " + ", ".join(sorted({b for _, b in veraltet})))
+    # feste Alias-Zuordnung auch auf schon gespeicherte Kämpfe anwenden ("Gargoyle" -> "Bell Gargoyle")
+    namen = lade_namen(os.path.join(HIER, "namen.json"))
+    for von, nach in ALIAS.items():
+        if nach in namen and von in namen:
+            for i, b in db.execute("SELECT id, boss FROM kaempfe").fetchall():
+                if norm(b) == von:
+                    kand = [dict(c, anzeige=namen[nach]["anzeige"]) for c in namen[nach]["kandidaten"]]
+                    db.execute("UPDATE kaempfe SET boss=?, platz=?, kandidaten=? WHERE id=?",
+                               (namen[nach]["anzeige"], nach, json.dumps(kand, ensure_ascii=False), i))
+                    print(f"umbenannt: {b} -> {namen[nach]['anzeige']} (Kampf {i})")
     db.commit()
     print(f"{len(alt)} Quellen entfernt.")
 
