@@ -176,6 +176,23 @@ def hat_leiste(rgb, box):
     return zeilen >= 2
 
 
+def umgeben_von_text(alle, box, groesse):
+    """True, wenn direkt über UND direkt unter dem Namen weitere Wörter stehen, die sich mit ihm
+    überlappen (Liste, Tabelle, Notizen). Ein Bossname steht allein über dem Spielbild; so fallen
+    Textlisten heraus, bei denen rote Rechtschreib-Wellenlinien die Leiste vortäuschen."""
+    l, o, bw, bh = box
+    r, u = l + bw, o + bh
+    oben = unten = False
+    for (x, y, w, h, t) in alle:
+        if sum(c.isalpha() for c in t) < 3 or x + w <= l or x >= r:
+            continue
+        if o - 2.2 * bh <= y + h <= o + 0.3 * bh and y < o:
+            oben = True
+        elif u - 0.3 * bh <= y <= u + 3.5 * bh and y > o:
+            unten = True
+    return oben and unten
+
+
 # ---------------------------------------------------------------- Texterkennung
 def tesseract_zeilen(pfad, sprache, psm):
     """Wörter mit Position, nach Textzeile gruppiert."""
@@ -201,7 +218,9 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
             continue
         pfad = os.path.join(TMP, "f.png")
         filt(img).save(pfad)
-        for wörter in tesseract_zeilen(pfad, sprache, psm).values():
+        zeilen = tesseract_zeilen(pfad, sprache, psm)
+        alle = [w for ws in zeilen.values() for w in ws]
+        for wörter in zeilen.values():
             wörter.sort()
             for i in range(len(wörter)):
                 for j in range(i, min(i + 5, len(wörter))):
@@ -214,7 +233,8 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
                         o = min(w[1] for w in wörter[i:j + 1])
                         r = max(w[0] + w[2] for w in wörter[i:j + 1])
                         u = max(w[1] + w[3] for w in wörter[i:j + 1])
-                        if LEISTENPRUEFUNG and not hat_leiste(rgb, (l, o, r - l, u - o)):
+                        if LEISTENPRUEFUNG and (not hat_leiste(rgb, (l, o, r - l, u - o))
+                                                or umgeben_von_text(alle, (l, o, r - l, u - o), rgb.size)):
                             continue
                         best = {"score": s, "key": n, "name": namen[n]["anzeige"],
                                 "kandidaten": namen[n]["kandidaten"], "text": text,
@@ -499,7 +519,7 @@ def scan(a):
             treffer.append((i, None, hit))
             if a.belege:
                 puffer = io.BytesIO()
-                img.convert("RGB").save(puffer, "JPEG", quality=80)
+                img.convert("RGB").save(puffer, "JPEG", quality=95, subsampling=0)
                 belege[i] = puffer.getvalue()
             print(f"  Bild {i}  {hit['text']!r}  {hit['score']:.2f}", file=sys.stderr)
         elif i % 50 == 0:
