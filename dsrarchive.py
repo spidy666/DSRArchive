@@ -150,13 +150,14 @@ def hat_leiste(rgb, box):
     mindest = int(0.03 * W)
     fruehester_start = (l - x0) - int(0.007 * W)    # echte Leiste beginnt am Namensrand, nicht weit links davon
     spaetester_start = (l - x0) + int(0.04 * W)
-    zeilen = 0
+    zeilen = rote = 0
     for y in range(y1 - y0):
         lauf = start = 0
         ok = False
         for x in range(breite):
             r, g, b = px[x, y]
             if r >= 22 and r > 1.8 * (g + 2) and r > 1.8 * (b + 2):   # dunkles Rot der Leiste
+                rote += 1
                 if lauf == 0:
                     start = x
                 lauf += 1
@@ -167,6 +168,11 @@ def hat_leiste(rgb, box):
                 lauf = 0
         if ok:
             zeilen += 1
+    if rote >= 0.3 * (y1 - y0) * breite and l < 0.25 * W:
+        # Große Teile unter dem Text sind rot (Lava, Feuer, Dämonenruinen): die Farbprüfung sagt dann
+        # nichts aus. Dann muss der Name wenigstens dort stehen, wo Bossnamen stehen, und nicht ganz links
+        # im Chat ("viele capra demons" bei Mahluna über Lava).
+        return False
     return zeilen >= 2
 
 
