@@ -800,6 +800,13 @@ def bereinigen(a):
         n = db.execute("DELETE FROM kaempfe WHERE video_id=?", (vid,)).rowcount
         db.execute("DELETE FROM videos WHERE id=?", (vid,))
         print(f"entfernt: {q} ({n} Kämpfe)")
+    # Kämpfe mit Namen, die nach den aktuellen Regeln keine Bossnamen mehr sind (alte Fehltreffer)
+    gueltig = set(lade_namen(os.path.join(HIER, "namen.json")))
+    veraltet = [(i, b) for i, b in db.execute("SELECT id, boss FROM kaempfe") if norm(b) not in gueltig]
+    for i, b in veraltet:
+        db.execute("DELETE FROM kaempfe WHERE id=?", (i,))
+    if veraltet:
+        print(f"{len(veraltet)} Kämpfe mit nicht mehr gültigem Namen entfernt: " + ", ".join(sorted({b for _, b in veraltet})))
     db.commit()
     print(f"{len(alt)} Quellen entfernt.")
 
