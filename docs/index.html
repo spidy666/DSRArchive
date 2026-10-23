@@ -45,7 +45,7 @@
   </div>
   <div class="anz" id="anz"></div>
   <table>
-    <thead><tr><th data-k="streamer">Streamer</th><th data-k="boss">Name an der Leiste</th><th>Mögliche Zuordnung</th><th>Video</th></tr></thead>
+    <thead><tr><th data-k="streamer">Streamer</th><th data-k="datum">Datum</th><th data-k="boss">Name an der Leiste</th><th>Mögliche Zuordnung</th><th>Video</th></tr></thead>
     <tbody id="body"></tbody>
   </table>
   <p class="sub" id="stand"></p>
@@ -76,6 +76,7 @@
     liste.forEach(function (d) {
       var tr = document.createElement("tr");
       td(tr, d.streamer);
+      td(tr, d.datum || "");
       td(tr, d.boss);
       var rc = document.createElement("td");
       d.deutungen.forEach(function (t) { var z = document.createElement("div"); z.textContent = t; rc.appendChild(z); });

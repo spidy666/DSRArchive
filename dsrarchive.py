@@ -434,19 +434,21 @@ def db_oeffnen(pfad):
     db.executescript("""
     CREATE TABLE IF NOT EXISTS videos (
         id INTEGER PRIMARY KEY, quelle TEXT UNIQUE, streamer TEXT, twitch_id TEXT,
-        titel TEXT, modus TEXT DEFAULT 'randomizer', dauer REAL, gescannt_am TEXT);
+        titel TEXT, modus TEXT DEFAULT 'randomizer', dauer REAL, gescannt_am TEXT, datum TEXT);
     CREATE TABLE IF NOT EXISTS kaempfe (
         id INTEGER PRIMARY KEY, video_id INTEGER REFERENCES videos(id),
         platz TEXT, boss TEXT, gebiet TEXT, rando_de TEXT, rando_en TEXT,
         kandidaten TEXT, start_s REAL, ende_s REAL, konfidenz REAL, treffer INTEGER);
     """)
+    if "datum" not in [r[1] for r in db.execute("PRAGMA table_info(videos)")]:   # ältere Datenbanken ergänzen
+        db.execute("ALTER TABLE videos ADD COLUMN datum TEXT")
     return db
 
 
 def quelle_aufloesen(quelle, a):
-    """Gibt (Abspielquelle, Streamer, Titel, Twitch-ID, Kapitel) zurück. Kapitel: Liste mit start_time, end_time, title (Spielwechsel) oder None."""
+    """Gibt (Abspielquelle, Streamer, Titel, Twitch-ID, Kapitel, Datum) zurück. Datum: Tag der Aufzeichnung (JJJJ-MM-TT) oder None. Kapitel: Liste mit start_time, end_time, title (Spielwechsel) oder None."""
     streamer, titel, tid = a.streamer, a.titel, a.twitch_id
-    src, kapitel = quelle, None
+    src, kapitel, datum = quelle, None, None
     if re.match(r"https?://", quelle):
         m = re.search(r"videos/(\d+)", quelle)
         tid = tid or (m and m.group(1))
@@ -456,11 +458,13 @@ def quelle_aufloesen(quelle, a):
         if r.returncode:
             sys.exit("yt-dlp konnte die Adresse nicht auflösen:\n" + r.stderr[-400:])
         src = r.stdout.split()[0]
-        r = subprocess.run(["yt-dlp", "--skip-download", "--print", "%(uploader)s\t%(title)s\t%(chapters)j", quelle],
+        r = subprocess.run(["yt-dlp", "--skip-download", "--print", "%(uploader)s\t%(title)s\t%(upload_date)s\t%(chapters)j", quelle],
                            capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.count("\t") >= 2:
-            u, t, ch = r.stdout.strip().split("\t", 2)
+        if r.returncode == 0 and r.stdout.count("\t") >= 3:
+            u, t, d, ch = r.stdout.strip().split("\t", 3)
             streamer, titel = streamer or u, titel or t
+            if re.fullmatch(r"\d{8}", d):
+                datum = f"{d[:4]}-{d[4:6]}-{d[6:]}"
             try:
                 kapitel = json.loads(ch) or None
             except ValueError:
@@ -468,7 +472,7 @@ def quelle_aufloesen(quelle, a):
     else:
         m = re.search(r"\[?v(\d{6,})\]?", os.path.basename(quelle))
         tid = tid or (m and m.group(1))
-    return src, streamer or "unbekannt", titel or os.path.basename(quelle), tid, kapitel
+    return src, streamer or "unbekannt", titel or os.path.basename(quelle), tid, kapitel, datum
 
 
 def scan(a):
@@ -480,12 +484,12 @@ def scan(a):
     if alt and not a.neu:
         print("Schon in der Datenbank, übersprungen (--neu zum erneuten Auswerten).")
         return
-    src, streamer, titel, tid, kapitel = quelle_aufloesen(a.quelle, a)
+    src, streamer, titel, tid, kapitel, datum = quelle_aufloesen(a.quelle, a)
     if alt:
         db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
         db.execute("DELETE FROM videos WHERE id=?", alt)
     w, h, dauer = video_info(src)
-    print(f"{streamer}: {titel} ({w}x{h}, {hms(dauer)}), Twitch-ID: {tid or 'unbekannt'}")
+    print(f"{streamer}: {titel} ({w}x{h}, {hms(dauer)}), Twitch-ID: {tid or 'unbekannt'}, Datum: {datum or 'unbekannt'}")
     treffer, zeiten, kal, vollsuchen, streifen, voll = [], [], None, 0, 0, set()
     belege = {}   # Bildnummer -> JPEG des Treffer-Bildes (nur für die Belegbilder der Einzeltreffer)
     letzter = None   # Index der letzten Stichprobe mit Treffer
@@ -578,9 +582,9 @@ def scan(a):
     print(f"Auswertung: {len(zeiten) or 'ca. ' + str(int(dauer / a.intervall))} Stichproben, "
           f"{vollsuchen} volle Suchen, {streifen} Streifen-Suchen, {time.time() - t0:.0f} s",
           file=sys.stderr)
-    cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am) "
-                     "VALUES(?,?,?,?,?,?,?)",
-                     (a.quelle, streamer, tid, titel, a.modus, dauer, datetime.now().isoformat(timespec="seconds")))
+    cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum) "
+                     "VALUES(?,?,?,?,?,?,?,?)",
+                     (a.quelle, streamer, tid, titel, a.modus, dauer, datetime.now().isoformat(timespec="seconds"), datum))
     vid = cur.lastrowid
     for k in kaempfe:
         kand = [dict(c, anzeige=k["name"]) for c in k["kandidaten"]]
@@ -602,11 +606,11 @@ def scan(a):
 def zeilen_aus_db(db):
     out = []
     for r in db.execute("SELECT v.streamer, v.titel, v.twitch_id, v.modus, k.boss, k.gebiet, k.rando_de,"
-                        " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer FROM kaempfe k"
+                        " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer, v.datum FROM kaempfe k"
                         " JOIN videos v ON v.id=k.video_id ORDER BY v.streamer, v.id, k.start_s"):
-        s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand, ende, treffer = r
+        s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand, ende, treffer, datum = r
         kand = json.loads(kand)
-        out.append({"streamer": s, "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
+        out.append({"streamer": s, "datum": datum, "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
                     "gebiet": gebiet, "gegner": re_, "start_s": int(start), "ende_s": int(ende or start),
                     "treffer": treffer, "konfidenz": konf,
                     "deutungen": [deutung_text(dict(c, anzeige=boss)) for c in kand],
@@ -628,7 +632,7 @@ def suche(a):
     zeilen = []
     for z in zeilen_aus_db(db_oeffnen(a.db)):
         if t in norm(" ".join([z["streamer"], z["boss"], z["gebiet"], z["gegner"]] + z["deutungen"])):
-            zeilen.append(f"{z['streamer']:<12} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
+            zeilen.append(f"{z['streamer']:<12} {z['datum'] or '??'} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
             zeilen += ["       " + d for d in z["deutungen"]]
     if a.out:   # direkt als UTF-8-Datei (die Umleitung > schreibt unter Windows in cp1252 und scheitert an Sonderzeichen)
         with open(a.out, "w", encoding="utf-8") as f:
