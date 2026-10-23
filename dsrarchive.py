@@ -12,7 +12,7 @@ Befehle:
 Voraussetzungen: Python 3, Pillow (pip install pillow), ffmpeg + ffprobe und tesseract
 im PATH (für deutschen Spieltext die Sprachdatei deu), für Adressen zusätzlich yt-dlp.
 """
-import argparse, difflib, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
+import argparse, difflib, io, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
 from datetime import datetime
 
 from PIL import Image, ImageFilter
@@ -453,6 +453,7 @@ def scan(a):
     w, h, dauer = video_info(src)
     print(f"{streamer}: {titel} ({w}x{h}, {hms(dauer)}), Twitch-ID: {tid or 'unbekannt'}")
     treffer, zeiten, kal, vollsuchen, streifen, voll = [], [], None, 0, 0, set()
+    belege = {}   # Bildnummer -> JPEG des Treffer-Bildes (nur für die Belegbilder der Einzeltreffer)
     letzter = None   # Index der letzten Stichprobe mit Treffer
     t0 = time.time()
     bereiche = None
@@ -490,6 +491,10 @@ def scan(a):
             letzter = i
             kal = streifen_um(hit, img.size)
             treffer.append((i, None, hit))
+            if a.belege:
+                puffer = io.BytesIO()
+                img.convert("RGB").save(puffer, "JPEG", quality=80)
+                belege[i] = puffer.getvalue()
             print(f"  Bild {i}  {hit['text']!r}  {hit['score']:.2f}", file=sys.stderr)
         elif i % 50 == 0:
             print(f"  ... Bild {i}", file=sys.stderr)
@@ -497,6 +502,17 @@ def scan(a):
     zeit = lambda i: zeiten[i] if i < len(zeiten) else i * a.intervall
     treffer = [(i, zeit(i), hit) for i, _, hit in treffer]
     kaempfe = [k for k in gruppiere(treffer, a.luecke) if k["treffer"] >= 2 or k["score"] >= 0.9]
+    if a.belege:   # Belegbild pro Einzeltreffer: zeigt, was genau als Bossname gelesen wurde
+        os.makedirs(a.belege, exist_ok=True)
+        for k in kaempfe:
+            if k["treffer"] == 1 and k["idx"] in belege:
+                sek = int(zeit(k["idx"]) + a.versatz)
+                basis = os.path.join(a.belege, f"{tid or dateiname(streamer)}_{sek}_{dateiname(k['name'])}")
+                with open(basis + ".jpg", "wb") as f:
+                    f.write(belege[k["idx"]])
+                with open(basis + ".txt", "w", encoding="utf-8") as f:
+                    f.write(f"{streamer} {hms(sek)} {k['name']}\ngelesen: {k['text']!r}  Wert: {k['score']:.2f}\n"
+                            f"{zeit_link(tid, sek) if tid else ''}\n")
     for k in kaempfe:
         lo, k["start"] = suche_luecke(k, zeit, voll, src, w, h, namen, a.lang, a.schwelle)
         verfeinere_start(k, lo, src, w, h, namen, a.lang, a.schwelle, kal)
@@ -688,6 +704,8 @@ def scan_optionen(s):
     s.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
     s.add_argument("--ohne-leistenpruefung", action="store_true",
                    help="auch Namen zählen, unter denen keine rote Lebensleiste liegt (z. B. bei Farbfiltern im Stream)")
+    s.add_argument("--belege", nargs="?", const=os.path.join(HIER, "daten", "belege"), default=None,
+                   help="Belegbilder (JPEG + Text) aller Einzeltreffer in diesen Ordner speichern (Standard: daten/belege)")
     s.add_argument("--neu", action="store_true", help="schon vorhandenes Video erneut auswerten")
     s.add_argument("--kapitel", default=r"dark souls.*remastered",
                    help="nur Videoabschnitte (Twitch-Kapitel) auswerten, deren Spielname dazu passt")
