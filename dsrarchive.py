@@ -373,9 +373,11 @@ def gruppiere(treffer, luecke):
             k["ende"] = t
             k["score"] = max(k["score"], hit["score"])
             k["treffer"] += 1
+            if hit["score"] > k["score"] - 1e-9 and hit.get("box"):
+                k["box"] = hit["box"]
         else:
-            kaempfe.append({"key": key, "name": hit["name"], "kandidaten": hit["kandidaten"],
-                            "start": t, "ende": t, "idx": idx,
+            kaempfe.append({"key": key, "keys": {key}, "name": hit["name"], "kandidaten": hit["kandidaten"],
+                            "start": t, "ende": t, "idx": idx, "box": hit.get("box"),
                             "score": hit["score"], "treffer": 1, "text": hit["text"]})
     return kaempfe
 
@@ -558,10 +560,18 @@ def scan(a):
         if m and k["start"] - m["ende"] <= a.luecke:
             m["ende"] = max(m["ende"], k["ende"])
             m["treffer"] += k["treffer"]
+            m["keys"] |= k["keys"]
             m["score"] = max(m["score"], k["score"])
         else:
             zusammen.append(k)
     kaempfe = zusammen
+    if not a.ohne_versuche:
+        einzeln = []
+        for k in kaempfe:
+            einzeln += versuche_trennen(k, src, w, h, namen, a.lang, a.schwelle, treffer, nur_schluessel,
+                                        pause=a.versuchspause)
+        print(f"  {len(kaempfe)} Kämpfe in {len(einzeln)} Versuche getrennt", file=sys.stderr)
+        kaempfe = einzeln
     for k in kaempfe:
         k["start"] += a.versatz   # Zeiten beziehen sich auf das ganze Twitch-Video
         k["ende"] += a.versatz
@@ -580,7 +590,8 @@ def scan(a):
                    "start_s,ende_s,konfidenz,treffer) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                    (vid, k["key"], k["name"], " / ".join(gebiete), "", " / ".join(gegner),
                     json.dumps(kand, ensure_ascii=False), k["start"], k["ende"], round(k["score"], 3), k["treffer"]))
-        print(f"{hms(k['start'])}–{hms(k['ende'])}  Leiste: {k['name']}  ({k['treffer']} Treffer)"
+        print(f"{hms(k['start'])}–{hms(k['ende'])}  Leiste: {k['name']}  ({k['treffer']} Treffer"
+              + (f", Versuch {k['versuch']}/{k['versuche']}" if k.get("versuch") else "") + ")"
               + (f"   {zeit_link(tid, k['start'] - LINK_VORLAUF)}" if tid else ""))
         for c in kand:
             print("      mögliche Deutung:", deutung_text(c))
@@ -738,10 +749,49 @@ def scan_optionen(s):
                    help="auch Namen zählen, unter denen keine rote Lebensleiste liegt (z. B. bei Farbfiltern im Stream)")
     s.add_argument("--belege", nargs="?", const=os.path.join(HIER, "daten", "belege"), default=None,
                    help="Belegbilder (JPEG + Text) aller Einzeltreffer in diesen Ordner speichern (Standard: daten/belege)")
+    s.add_argument("--versuchspause", type=int, default=20,
+                   help="Sekunden ohne Lebensleiste, ab denen ein neuer Versuch beginnt")
+    s.add_argument("--ohne-versuche", action="store_true",
+                   help="Kämpfe nicht in einzelne Versuche trennen (Ende wird dann nicht genau bestimmt)")
     s.add_argument("--neu", action="store_true", help="schon vorhandenes Video erneut auswerten")
     s.add_argument("--kapitel", default=r"dark souls.*remastered",
                    help="nur Videoabschnitte (Twitch-Kapitel) auswerten, deren Spielname dazu passt")
     s.add_argument("--ganzes-video", action="store_true", help="Kapitel ignorieren, das ganze Video auswerten")
+
+
+def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schluessel, intervall=5, pause=20):
+    """Teilt einen Kampf in einzelne Versuche. Das Ende wird genau bestimmt, dann wird im Kampffenster
+    alle `intervall` s geprüft, ob die rote Leiste unter dem Namen noch da ist (billige Farbprüfung,
+    keine Texterkennung). Ist sie mindestens `pause` s weg, beginnt danach ein neuer Versuch.
+    Gibt die Liste der Versuche zurück (Rückfall: der ganze Kampf als einer)."""
+    k["ende"] = ende_bestimmen(src, w, h, namen, sprache, schwelle, k.get("keys") or k["key"], k["ende"])
+    if not k.get("box"):
+        return [k]
+    zeiten = []
+    flags = []
+    von, bis = k["start"], k["ende"] + intervall
+    for img in bilder(src, w, h, intervall, zeiten, nur_schluessel, [(von, bis)]):   # Zeiten stehen erst danach fest
+        ok = hat_leiste(img, tuple(k["box"])) if LEISTENPRUEFUNG else True
+        if not ok:   # Farbprüfung unsicher (dunkle oder verdeckte Leiste): gilt nur als weg, wenn auch der Name fehlt
+            hit = suche_mit_streifen(img, streifen_um({"box": k["box"]}, img.size), namen, sprache, schwelle)
+            ok = bool(hit and hit["key"] in k["keys"])
+        flags.append(ok)
+    da = [t for t, ok in zip(zeiten, flags) if ok]
+    if len(da) < 2:
+        return [k]
+    gruppen = [[da[0]]]
+    for t in da[1:]:
+        if t - gruppen[-1][-1] - intervall >= pause:
+            gruppen.append([t])
+        else:
+            gruppen[-1].append(t)
+    out = []
+    for i, g in enumerate(gruppen):
+        a_start = k["start"] if i == 0 else g[0]
+        a_ende = k["ende"] if i == len(gruppen) - 1 else g[-1] + intervall / 2
+        n = sum(1 for _, t, h_ in treffer if h_["key"] in k["keys"] and a_start - 15 <= t <= a_ende + 15)
+        out.append(dict(k, start=a_start, ende=a_ende, treffer=max(1, n), versuch=i + 1, versuche=len(gruppen)))
+    return out
 
 
 def ende_bestimmen(src, w, h, namen, sprache, schwelle, key, letzter, spanne=30):
@@ -752,7 +802,7 @@ def ende_bestimmen(src, w, h, namen, sprache, schwelle, key, letzter, spanne=30)
         mitte = (lo + hi) / 2
         img = bild_bei(src, w, h, mitte)
         hit = finde_namen(img, namen, sprache, schwelle) if img else None
-        if hit and hit["key"] == key:
+        if hit and (hit["key"] in key if isinstance(key, (set, frozenset)) else hit["key"] == key):
             lo = mitte
         else:
             hi = mitte
