@@ -139,7 +139,7 @@ def vergleiche(text, namen, schwelle):
 LEISTENPRUEFUNG = True
 
 
-def hat_leiste(rgb, box):
+def hat_leiste(rgb, box, info=None):
     """Prüft, ob unter dem Namen die Lebensleiste des Bosses liegt: ein waagerechtes rotes Band,
     das nahe am linken Namensrand beginnt. Es zählt die längste zusammenhängende rote Strecke
     einer Zeile (mindestens 3 % der Bildbreite), damit auch eine fast leere Leiste erkannt wird.
@@ -174,6 +174,8 @@ def hat_leiste(rgb, box):
                 lauf = 0
         if ok:
             zeilen += 1
+    if info is not None:
+        info["gesaettigt"] = rote >= 0.3 * (y1 - y0) * breite   # Lava/Feuer: Farbe sagt nichts über die Leiste
     if rote >= 0.3 * (y1 - y0) * breite and l < 0.30 * W:
         # Große Teile unter dem Text sind rot (Lava, Feuer, Dämonenruinen): die Farbprüfung sagt dann
         # nichts aus. Dann muss der Name wenigstens dort stehen, wo Bossnamen stehen, und nicht ganz links
@@ -776,7 +778,10 @@ def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schlue
     flags = []
     von, bis = k["start"], k["ende"] + 35
     for img in bilder(src, w, h, intervall, zeiten, nur_schluessel, [(von, bis)]):   # Zeiten stehen erst danach fest
-        ok = hat_leiste(img, tuple(k["box"])) if LEISTENPRUEFUNG else True
+        info = {}
+        ok = hat_leiste(img, tuple(k["box"]), info) if LEISTENPRUEFUNG else True
+        if info.get("gesaettigt"):
+            ok = False   # roter Hintergrund (Dämonenruinen): nur der Name zählt
         if not ok:   # Farbprüfung unsicher (dunkle oder verdeckte Leiste): gilt nur als weg, wenn auch der Name fehlt
             hit = suche_mit_streifen(img, streifen_um({"box": k["box"]}, img.size), namen, sprache, schwelle)
             ok = bool(hit and hit["key"] in k["keys"])
