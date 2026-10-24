@@ -174,7 +174,7 @@ def hat_leiste(rgb, box):
                 lauf = 0
         if ok:
             zeilen += 1
-    if rote >= 0.3 * (y1 - y0) * breite and l < 0.25 * W:
+    if rote >= 0.3 * (y1 - y0) * breite and l < 0.30 * W:
         # Große Teile unter dem Text sind rot (Lava, Feuer, Dämonenruinen): die Farbprüfung sagt dann
         # nichts aus. Dann muss der Name wenigstens dort stehen, wo Bossnamen stehen, und nicht ganz links
         # im Chat ("viele capra demons" bei Mahluna über Lava).
@@ -764,24 +764,26 @@ def scan_optionen(s):
 
 
 def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schluessel, intervall=5, pause=20):
-    """Teilt einen Kampf in einzelne Versuche. Das Ende wird genau bestimmt, dann wird im Kampffenster
-    alle `intervall` s geprüft, ob die rote Leiste unter dem Namen noch da ist (billige Farbprüfung,
-    keine Texterkennung). Ist sie mindestens `pause` s weg, beginnt danach ein neuer Versuch.
+    """Teilt einen Kampf in einzelne Versuche. Das Kampffenster (bis 35 s hinter dem letzten Namenstreffer)
+    wird alle `intervall` s geprüft: ist die rote Leiste unter dem Namen noch da (billige Farbprüfung), oder
+    steht wenigstens der Name noch da? Fehlt beides mindestens `pause` s, beginnt danach ein neuer Versuch.
+    Das Ende jedes Versuchs ist die letzte Stichprobe mit Leiste (auf `intervall` s genau).
     Gibt die Liste der Versuche zurück (Rückfall: der ganze Kampf als einer)."""
-    k["ende"] = ende_bestimmen(src, w, h, namen, sprache, schwelle, k.get("keys") or k["key"], k["ende"])
+    k["ende"] = max(k["ende"], k["start"])
     if not k.get("box"):
         return [k]
     zeiten = []
     flags = []
-    von, bis = k["start"], k["ende"] + intervall
+    von, bis = k["start"], k["ende"] + 35
     for img in bilder(src, w, h, intervall, zeiten, nur_schluessel, [(von, bis)]):   # Zeiten stehen erst danach fest
         ok = hat_leiste(img, tuple(k["box"])) if LEISTENPRUEFUNG else True
         if not ok:   # Farbprüfung unsicher (dunkle oder verdeckte Leiste): gilt nur als weg, wenn auch der Name fehlt
             hit = suche_mit_streifen(img, streifen_um({"box": k["box"]}, img.size), namen, sprache, schwelle)
             ok = bool(hit and hit["key"] in k["keys"])
         flags.append(ok)
-    da = [t for t, ok in zip(zeiten, flags) if ok]
-    if len(da) < 2:
+    # nur Stichproben im angefragten Fenster (HLS liefert gelegentlich Bilder dahinter)
+    da = [t for t, ok in zip(zeiten, flags) if ok and von - 2 <= t <= bis + 2]
+    if not da:
         return [k]
     gruppen = [[da[0]]]
     for t in da[1:]:
@@ -791,8 +793,8 @@ def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schlue
             gruppen[-1].append(t)
     out = []
     for i, g in enumerate(gruppen):
-        a_start = k["start"] if i == 0 else g[0]
-        a_ende = k["ende"] if i == len(gruppen) - 1 else g[-1] + intervall / 2
+        a_start = k["start"] if i == 0 else max(gruppen[i - 1][-1] + intervall, g[0] - intervall / 2)
+        a_ende = max(g[-1] + intervall / 2, a_start)
         n = sum(1 for _, t, h_ in treffer if h_["key"] in k["keys"] and a_start - 15 <= t <= a_ende + 15)
         out.append(dict(k, start=a_start, ende=a_ende, treffer=max(1, n), versuch=i + 1, versuche=len(gruppen)))
     return out
