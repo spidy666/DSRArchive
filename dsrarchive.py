@@ -784,6 +784,7 @@ def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schlue
     # nur Stichproben im angefragten Fenster (HLS liefert gelegentlich Bilder dahinter)
     da = [t for t, ok in zip(zeiten, flags) if ok and von - 2 <= t <= bis + 2]
     if not da:
+        k["ende"] = k["start"] + intervall / 2   # Einzeltreffer: mindestens eine halbe Stichprobe lang
         return [k]
     gruppen = [[da[0]]]
     for t in da[1:]:
@@ -913,6 +914,9 @@ def bereinigen(a):
         db.execute("DELETE FROM kaempfe WHERE id=?", (i,))
     if veraltet:
         print(f"{len(veraltet)} Kämpfe mit nicht mehr gültigem Namen entfernt: " + ", ".join(sorted({b for _, b in veraltet})))
+    kurz = db.execute("UPDATE kaempfe SET ende_s=start_s+2.5 WHERE ende_s < start_s+2.5").rowcount
+    if kurz:
+        print(f"{kurz} Kämpfe mit Ende vor oder gleich dem Start auf 2,5 s Länge gesetzt.")
     # feste Alias-Zuordnung auch auf schon gespeicherte Kämpfe anwenden ("Gargoyle" -> "Bell Gargoyle")
     namen = lade_namen(os.path.join(HIER, "namen.json"))
     for von, nach in ALIAS.items():
