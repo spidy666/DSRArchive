@@ -776,18 +776,23 @@ def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schlue
         return [k]
     zeiten = []
     flags = []
+    lava = False
     von, bis = k["start"], k["ende"] + 35
     for img in bilder(src, w, h, intervall, zeiten, nur_schluessel, [(von, bis)]):   # Zeiten stehen erst danach fest
         info = {}
         ok = hat_leiste(img, tuple(k["box"]), info) if LEISTENPRUEFUNG else True
         if info.get("gesaettigt"):
             ok = False   # roter Hintergrund (Dämonenruinen): nur der Name zählt
+            lava = True
         if not ok:   # Farbprüfung unsicher (dunkle oder verdeckte Leiste): gilt nur als weg, wenn auch der Name fehlt
             hit = suche_mit_streifen(img, streifen_um({"box": k["box"]}, img.size), namen, sprache, schwelle)
             ok = bool(hit and hit["key"] in k["keys"])
         flags.append(ok)
     # nur Stichproben im angefragten Fenster (HLS liefert gelegentlich Bilder dahinter)
     da = [t for t, ok in zip(zeiten, flags) if ok and von - 2 <= t <= bis + 2]
+    if lava:   # Name allein wird alle 5 s oft nicht gelesen: die bekannten Treffer zählen als anwesend
+        da = sorted(set(da) | {t for _, t, h_ in treffer if h_["key"] in k["keys"] and von - 2 <= t <= bis + 2})
+        pause = max(pause, 45)
     if not da:
         k["ende"] = k["start"] + intervall / 2   # Einzeltreffer: mindestens eine halbe Stichprobe lang
         return [k]
@@ -801,6 +806,8 @@ def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schlue
     for i, g in enumerate(gruppen):
         a_start = k["start"] if i == 0 else max(gruppen[i - 1][-1] + intervall, g[0] - intervall / 2)
         a_ende = max(g[-1] + intervall / 2, a_start)
+        if lava and len(gruppen) == 1:
+            a_ende = max(a_ende, k["ende"])   # ein Kampf, nichts zu trennen: bisheriges Ende behalten
         n = sum(1 for _, t, h_ in treffer if h_["key"] in k["keys"] and a_start - 15 <= t <= a_ende + 15)
         out.append(dict(k, start=a_start, ende=a_ende, treffer=max(1, n), versuch=i + 1, versuche=len(gruppen)))
     return out
