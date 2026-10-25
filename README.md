@@ -30,7 +30,13 @@ python dsrarchive.py export
 - **Versuche trennen:** Nach der Erkennung wird das Ende jedes Kampfes auf etwa 2 s bestimmt und das Kampffenster alle 5 s geprüft (rote Leiste unter dem Namen, bei unsicherer Farbe zusätzlich der Name). Fehlt beides mindestens `--versuchspause` Sekunden (Standard 20), beginnt danach ein neuer Versuch mit eigenem Eintrag und Link. Schnellere Wiederholungen (Leiste weg unter 20 s) bleiben ein Eintrag. In Lava- und Feuerszenen taugt die Farbprüfung nicht, dort hilft nur der Name. `--ohne-versuche` schaltet das ab. Im Test mit zusammengeschnittenem Clip (30 s Pause) getrennt, am echten Clip ohne Fehltrennung (Pause 10 s trennte fälschlich, deshalb 20 s).
 - `--belege [ORDNER]`: speichert für jeden Einzeltreffer das Bild und den gelesenen Text (Standard `daten/belege`), um Fehltreffer zu prüfen.
 - `bereinigen`: entfernt Test-Einträge, Kämpfe mit nicht mehr gültigem Bossnamen und wendet die feste Alias-Tabelle an (`ALIAS`, z. B. „Gargoyle" = „Bell Gargoyle", weil Webcams das „Bell" verdecken). `abdeckung`: zeigt, welche Bosse und Streamer wie oft in der Datenbank stehen. `clips`: lädt die Kämpfe als 720p-Ausschnitte (private Sicherung, `--nur-planen` zeigt nur den Plan, noch nicht an echtem Twitch getestet).
-- Die Datenbank liegt in `daten/archiv.db` (nicht im Repo). `export` schreibt `docs/kaempfe.json`, die Suchseite `docs/index.html` liest diese Datei.
+- Die Datenbank liegt lokal in `daten/archiv.db` und wird nicht ins Repo eingecheckt. `python dsrarchive.py export` erzeugt daraus `docs/kaempfe.json`, das die statische Suchseite verwendet.
+
+## Webseite
+- Die öffentliche Suchseite ist unter <https://spidy666.github.io/DSRArchive/> erreichbar.
+- Die Seite läuft vollständig statisch auf GitHub Pages. Sie liest den öffentlichen JSON-Export im Browser; eine SQLite-Datenbank oder ein Server-Backend läuft dort nicht.
+- Nach neuen Scans den Export mit `python dsrarchive.py export` aktualisieren und `docs/kaempfe.json` veröffentlichen. Der Export enthält Streamer, Videotitel, Twitch-Links, Zeitstempel und erkannte Bosszuordnungen und ist öffentlich sichtbar.
+- Die Suche filtert nach Streamer, Boss und Gebiet und durchsucht außerdem Gegner, Titel und mögliche Zuordnungen. Die Ergebnistabelle lässt sich sortieren und ist seitenweise aufgebaut.
 
 ## So funktioniert die Erkennung
 Aus dem unteren Teil des Bildes (ab 55 % der Höhe) wird alle N Sekunden ein Bild geholt. Tesseract liest den Text mit drei Bildfiltern, der beste Treffer gegen die englischen Bossnamen (unscharfer Vergleich, auch Namensanfänge wie „Chaos Witch“) gewinnt. Es gibt keinen festen Ausschnitt, die Namensleiste wird im Bild gesucht.
