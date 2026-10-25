@@ -118,3 +118,12 @@ Fortsetzung: ffprobe-Metadaten robust validieren
 - Vier Regressionstests ergänzt: gültige Ausgabe, fehlende Auflösung, nichtnumerische Dauer und unendliche Dauer.
 - Verifiziert: `python -m unittest discover -s tests -v` — 21 Tests erfolgreich; `git diff --check` für die bearbeiteten Code-/Testdateien sauber.
 - Keine echten Medien/externen Tools ausgeführt. Nutzerdateien `kanaele.txt` und `ergebnis.txt` unangetastet. Noch nicht committed oder gepusht.
+
+Fortsetzung: Startfehler externer Werkzeuge
+------------------------------------------
+- Branch `codex/process-launch-errors` von aktuellem `main` angelegt.
+- `_run_checked()` wandelt allgemeine `OSError`-Fehler beim Start von ffprobe, Tesseract oder FFmpeg in eine verständliche `RuntimeError`-Meldung um; fehlendes Programm und Timeout behalten ihre spezifischen Meldungen.
+- Der FFmpeg-Popen-Stream behandelt Startfehler analog.
+- Zwei Regressionstests für verweigerten Programmstart ergänzt (Wrapper und FFmpeg-Stream).
+- Verifiziert: `python -m unittest discover -s tests -v` — 23 Tests erfolgreich. Noch nicht committed oder gepusht; keine echten Medien/Programme ausgeführt.
+- Nutzerdateien `kanaele.txt` und `ergebnis.txt` unberührt.

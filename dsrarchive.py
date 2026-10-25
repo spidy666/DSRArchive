@@ -273,6 +273,9 @@ def _run_checked(cmd, werkzeug, timeout, **kwargs):
         raise RuntimeError(f"{werkzeug} wurde nicht gefunden ({cmd[0]}).") from e
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"{werkzeug} hat das Zeitlimit von {timeout} s überschritten.") from e
+    except OSError as e:
+        ursache = e.strerror or str(e)
+        raise RuntimeError(f"{werkzeug} konnte nicht gestartet werden: {ursache}.") from e
     if r.returncode:
         fehler = getattr(r, "stderr", None)
         if isinstance(fehler, bytes):
@@ -360,6 +363,9 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
                 p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
             except FileNotFoundError as e:
                 raise RuntimeError("FFmpeg wurde nicht gefunden (ffmpeg).") from e
+            except OSError as e:
+                ursache = e.strerror or str(e)
+                raise RuntimeError(f"FFmpeg konnte nicht gestartet werden: {ursache}.") from e
             vollstaendig = False
             try:
                 while True:
