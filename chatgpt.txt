@@ -101,3 +101,11 @@ Abschluss-Review (2026-10-25; ohne zweiten Clip)
 - Kein Commit oder Push vorgenommen.
 - Offene Grenzen: Unit-Tests mocken externe Programme; reale Fehlerpfade von FFmpeg/Tesseract wurden nicht separat provoziert. Es gibt noch keinen CI-Lauf und keine breite Präzisions-/Recall-Messung auf gelabeltem Videomaterial.
 - Stand ist reviewbar auf `codex/project-hardening`; nächster sinnvoller Schritt: Nutzer prüft den Diff und entscheidet, ob die Änderungen committed werden sollen.
+
+Fortsetzung nach Merge: automatische Tests auf GitHub
+-----------------------------------------------------
+- Nutzer bestätigte den erfolgreichen lokalen Stand auf `main` (`main...origin/main`); lokale Änderungen an `kanaele.txt` und neue `ergebnis.txt` blieben erhalten.
+- Auf `main` war keine GitHub-Actions-Konfiguration vorhanden. README und `requirements.txt` geprüft: Offline-Tests benötigen nur Python und Pillow; FFmpeg, Tesseract und Twitch sind für diese Tests nicht erforderlich.
+- Neu erstellt `.github/workflows/tests.yml`: führt auf `windows-latest` bei Push und Pull Request mit Python 3.12 `pip install -r requirements.txt` und `python -m unittest discover -s tests -v` aus.
+- Keine Tests in dieser Fortsetzung ausgeführt. Der vorherige lokale Lauf vor dem Merge hatte 17 Tests erfolgreich; der neu erstellte GitHub-Workflow muss erst durch einen Push/PR laufen.
+- Unberührt: `kanaele.txt` und `ergebnis.txt`. Keine weiteren Dateien geändert.
