@@ -109,3 +109,4 @@ Fortsetzung nach Merge: automatische Tests auf GitHub
 - Neu erstellt `.github/workflows/tests.yml`: führt auf `windows-latest` bei Push und Pull Request mit Python 3.12 `pip install -r requirements.txt` und `python -m unittest discover -s tests -v` aus.
 - Keine Tests in dieser Fortsetzung ausgeführt. Der vorherige lokale Lauf vor dem Merge hatte 17 Tests erfolgreich; der neu erstellte GitHub-Workflow muss erst durch einen Push/PR laufen.
 - Unberührt: `kanaele.txt` und `ergebnis.txt`. Keine weiteren Dateien geändert.
+- GitHub Actions nach Push `1f991dc`: Workflow `tests.yml`, Job `offline-tests` erfolgreich (grüner Haken, 24 Sekunden; Nutzer-Screenshot). Damit sind die 17 Offline-Tests auch auf `windows-latest` mit Python 3.12 erfolgreich durchgelaufen.
