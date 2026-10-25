@@ -12,7 +12,7 @@ Befehle:
 Voraussetzungen: Python 3, Pillow (pip install pillow), ffmpeg + ffprobe und tesseract
 im PATH (für deutschen Spieltext die Sprachdatei deu), für Adressen zusätzlich yt-dlp.
 """
-import argparse, difflib, io, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
+import argparse, difflib, io, json, math, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -290,9 +290,13 @@ def video_info(quelle):
     try:
         d = json.loads(r.stdout)
         s = d["streams"][0]
-    except (ValueError, KeyError, IndexError, TypeError) as e:
+        w, h = int(s["width"]), int(s["height"])
+        dauer = float(d.get("format", {}).get("duration") or 0)
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
         raise RuntimeError("ffprobe lieferte keine gültigen Video-Metadaten.") from e
-    return s["width"], s["height"], float(d.get("format", {}).get("duration") or 0)
+    if w <= 0 or h <= 0 or not math.isfinite(dauer) or dauer < 0:
+        raise RuntimeError("ffprobe lieferte ungültige Video-Metadaten (Auflösung oder Dauer).")
+    return w, h, dauer
 
 
 def breite_fuer(w):
