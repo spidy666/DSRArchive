@@ -177,6 +177,22 @@ class ExterneWerkzeugeUndTransaktionen(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Zeitlimit von 60 s"):
                 dsrarchive._run_checked(["tesseract"], "Tesseract", 60)
 
+    def test_berechtigungsfehler_beim_starten_wird_verstaendlich_gemeldet(self):
+        with patch.object(
+            dsrarchive.subprocess, "run", side_effect=PermissionError(13, "Zugriff verweigert")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Tesseract konnte nicht gestartet werden"):
+                dsrarchive._run_checked(["tesseract"], "Tesseract", 60)
+
+    def test_ffmpeg_stream_meldet_berechtigungsfehler_ohne_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(dsrarchive, "temp_verzeichnis", return_value=tmp), \
+             patch.object(
+                 dsrarchive.subprocess, "Popen", side_effect=PermissionError(13, "Zugriff verweigert")
+             ):
+            with self.assertRaisesRegex(RuntimeError, "FFmpeg konnte nicht gestartet werden"):
+                next(dsrarchive.bilder("video.mp4", 1920, 1080, 30, []))
+
     def test_cli_zeigt_werkzeugfehler_ohne_traceback(self):
         stderr = io.StringIO()
         with patch.object(sys, "argv", ["dsrarchive.py", "scan", "video.mp4"]), \
