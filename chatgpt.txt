@@ -141,3 +141,7 @@ Fortsetzung: öffentliche GitHub-Pages-Suche
 - Branch `codex/pages-boss-search`; noch nicht committed/pushed. Nutzerdateien `kanaele.txt` und `ergebnis.txt` unangetastet. `chatgpt.txt` enthält vorherige Verlaufsnotiz und diese Ergänzung.
 - Zusatzprüfung vor Veröffentlichung: `python -m unittest discover -s tests -v` — 23 Tests erfolgreich; JavaScript-Syntax mit Node validiert; JSON mit 853 Einträgen/15 Streamern und ausschließlich HTTPS-Twitch-Video-Links validiert; `git diff --check` sauber.
 - Lokale Browser-Vorschau nicht ausgeführt: Computer-Use-Umgebung brach ab, weil sie die aktuelle Browser-URL nicht sicher bestimmen konnte. Das ist keine Laufzeitprüfung der Webseite; nach dem Deploy wird die öffentliche URL geprüft.
+- Deployment abgeschlossen: PR #4 gemerged, Merge-Commit `0e5bcd1025091209326639d572fee3edb7a9e98c`; beide Offline-CI-Läufe erfolgreich.
+- GitHub Pages über Repository-API aktiviert: Veröffentlichungsquelle `main:/docs`, HTTPS erzwungen. Pages-Build `1313243301` meldete `built` (ca. 33 s).
+- Remote geprüft: `https://spidy666.github.io/DSRArchive/` liefert HTTP 200 und den erwarteten Titel; `/kaempfe.json` liefert Datenstand 2026-10-25 und 853 Kämpfe.
+- Lokale `main` auf Merge-Commit `0e5bcd1` aktualisiert. `kanaele.txt`/`ergebnis.txt` bleiben unberührt. Browser-Vorschau lokal konnte wegen Computer-Use-URL-Sicherheitsprüfung nicht geöffnet werden; Veröffentlichung remote per HTTP geprüft.
