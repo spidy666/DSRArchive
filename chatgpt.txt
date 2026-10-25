@@ -110,3 +110,11 @@ Fortsetzung nach Merge: automatische Tests auf GitHub
 - Keine Tests in dieser Fortsetzung ausgeführt. Der vorherige lokale Lauf vor dem Merge hatte 17 Tests erfolgreich; der neu erstellte GitHub-Workflow muss erst durch einen Push/PR laufen.
 - Unberührt: `kanaele.txt` und `ergebnis.txt`. Keine weiteren Dateien geändert.
 - GitHub Actions nach Push `1f991dc`: Workflow `tests.yml`, Job `offline-tests` erfolgreich (grüner Haken, 24 Sekunden; Nutzer-Screenshot). Damit sind die 17 Offline-Tests auch auf `windows-latest` mit Python 3.12 erfolgreich durchgelaufen.
+
+Fortsetzung: ffprobe-Metadaten robust validieren
+------------------------------------------------
+- Nach dem grünen CI-Lauf wurde Branch `codex/ffprobe-metadata-errors` von aktuellem `main` angelegt.
+- `video_info()` prüft jetzt, dass Breite/Höhe vorhanden und positive Ganzzahlen sind sowie Dauer numerisch, endlich und nicht negativ ist. Ungültige/invollständige ffprobe-Ausgabe wird als `RuntimeError` gemeldet und von der CLI lesbar ausgegeben.
+- Vier Regressionstests ergänzt: gültige Ausgabe, fehlende Auflösung, nichtnumerische Dauer und unendliche Dauer.
+- Verifiziert: `python -m unittest discover -s tests -v` — 21 Tests erfolgreich; `git diff --check` für die bearbeiteten Code-/Testdateien sauber.
+- Keine echten Medien/externen Tools ausgeführt. Nutzerdateien `kanaele.txt` und `ergebnis.txt` unangetastet. Noch nicht committed oder gepusht.

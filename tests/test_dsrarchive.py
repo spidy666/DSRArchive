@@ -139,6 +139,32 @@ class TwitchHilfsfunktionen(unittest.TestCase):
 
 
 class ExterneWerkzeugeUndTransaktionen(unittest.TestCase):
+    def test_video_info_parst_gueltige_metadaten(self):
+        result = type("Result", (), {"stdout": '{"streams":[{"width":1920,"height":1080}],'
+                                              '"format":{"duration":"12.5"}}'})()
+        with patch.object(dsrarchive, "_run_checked", return_value=result):
+            self.assertEqual(dsrarchive.video_info("video.mp4"), (1920, 1080, 12.5))
+
+    def test_video_info_meldet_unvollstaendige_metadaten_verstaendlich(self):
+        result = type("Result", (), {"stdout": '{"streams":[{}],"format":{"duration":"12.5"}}'})()
+        with patch.object(dsrarchive, "_run_checked", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "keine gültigen Video-Metadaten"):
+                dsrarchive.video_info("video.mp4")
+
+    def test_video_info_meldet_nichtnumerische_dauer_verstaendlich(self):
+        result = type("Result", (), {"stdout": '{"streams":[{"width":1920,"height":1080}],'
+                                              '"format":{"duration":"unbekannt"}}'})()
+        with patch.object(dsrarchive, "_run_checked", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "keine gültigen Video-Metadaten"):
+                dsrarchive.video_info("video.mp4")
+
+    def test_video_info_lehnt_unendliche_dauer_ab(self):
+        result = type("Result", (), {"stdout": '{"streams":[{"width":1920,"height":1080}],'
+                                              '"format":{"duration":"inf"}}'})()
+        with patch.object(dsrarchive, "_run_checked", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "ungültige Video-Metadaten"):
+                dsrarchive.video_info("video.mp4")
+
     def test_externer_prozessfehler_wird_mit_stderr_weitergegeben(self):
         result = type("Result", (), {"returncode": 2, "stderr": "kaputtes Video"})()
         with patch.object(dsrarchive.subprocess, "run", return_value=result):
