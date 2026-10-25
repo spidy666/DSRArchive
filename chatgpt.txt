@@ -127,3 +127,17 @@ Fortsetzung: Startfehler externer Werkzeuge
 - Zwei Regressionstests für verweigerten Programmstart ergänzt (Wrapper und FFmpeg-Stream).
 - Verifiziert: `python -m unittest discover -s tests -v` — 23 Tests erfolgreich. Noch nicht committed oder gepusht; keine echten Medien/Programme ausgeführt.
 - Nutzerdateien `kanaele.txt` und `ergebnis.txt` unberührt.
+- Automatisierter Abschluss für `codex/process-launch-errors`: Branch gepusht, PR #3 erstellt und angehängt, beide `offline-tests`-Checks erfolgreich, PR mit Merge-Commit `ab1d3ca25ba2eedeead51c5e190fdd70c03f83d6` gemerged.
+- Lokale `main` danach per Fast-Forward auf `origin/main` aktualisiert. Nutzeränderungen `kanaele.txt` (modified) und `ergebnis.txt` (untracked) blieben erhalten.
+
+Fortsetzung: öffentliche GitHub-Pages-Suche
+-------------------------------------------
+- Nutzer bat um eine GitHub-Pages-Website mit durchsuchbarer Datenbank. Vorhandene docs/index.html war eine einfache Suchseite; docs/kaempfe.json war leer.
+- Lokale Archivdatenbank read-only geprüft: 94 Videos, 853 Kämpfe. Bestehenden Exportbefehl `python dsrarchive.py export` verwendet; `docs/kaempfe.json` enthält nun 853 Einträge (536 KB), 15 Streamer, Datenstand 2026-10-25. Alle nichtleeren Links sind HTTPS-Twitch-Video-Links. Der Export veröffentlicht Streamer, Titel, Zeitstempel und erkannte Zuordnungen öffentlich, wie für die angefragte Webseite erforderlich.
+- docs/index.html durch eine responsive statische Suchoberfläche ersetzt: Freitextsuche, Filter für Streamer/Boss/Gebiet, Sortierung, 50 Ergebnisse pro Seite, Twitch-Zeitlinks, Status-/Fehlermeldung und Hinweis, dass OCR-Einträge keine bestätigten Siege sind. Ausgabe nutzt textContent/DOM-APIs; Twitch-Ziel-Hosts werden validiert.
+- README um Website-URL, Architektur und Export-Ablauf ergänzt.
+- Prüfergebnisse: JSON-Schema/Anzahl/Links validiert; JavaScript-Syntax über Node `new Function()` geprüft; `git diff --check` für geänderte Website-/Daten-/README-Dateien sauber. Noch kein Browser-Rendering geprüft.
+- GitHub Pages REST-API GET ergab 404, Pages ist derzeit nicht konfiguriert. Nach Merge muss Pages für `main` und Ordner `/docs` aktiviert werden; das ist ausdrücklich Teil des Nutzerauftrags.
+- Branch `codex/pages-boss-search`; noch nicht committed/pushed. Nutzerdateien `kanaele.txt` und `ergebnis.txt` unangetastet. `chatgpt.txt` enthält vorherige Verlaufsnotiz und diese Ergänzung.
+- Zusatzprüfung vor Veröffentlichung: `python -m unittest discover -s tests -v` — 23 Tests erfolgreich; JavaScript-Syntax mit Node validiert; JSON mit 853 Einträgen/15 Streamern und ausschließlich HTTPS-Twitch-Video-Links validiert; `git diff --check` sauber.
+- Lokale Browser-Vorschau nicht ausgeführt: Computer-Use-Umgebung brach ab, weil sie die aktuelle Browser-URL nicht sicher bestimmen konnte. Das ist keine Laufzeitprüfung der Webseite; nach dem Deploy wird die öffentliche URL geprüft.

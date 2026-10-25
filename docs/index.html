@@ -3,106 +3,369 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DSR-Archiv – Bosse in Streams finden</title>
+<meta name="theme-color" content="#11100e">
+<meta name="description" content="Durchsuche erkannte Bosskämpfe aus Dark-Souls-Remastered-Randomizer-Streams.">
+<title>DSR-Archiv – Bosskämpfe durchsuchen</title>
 <style>
-  :root { --bg:#14120f; --card:#1d1a15; --text:#e9e2d0; --dim:#9b937f; --gold:#d9b45f; --line:#352f25; }
-  @media (prefers-color-scheme: light) {
-    :root { --bg:#f6f2e8; --card:#fffdf7; --text:#2a251b; --dim:#6f6753; --gold:#8a6414; --line:#ddd3bd; }
+  :root {
+    color-scheme: dark;
+    --bg: #11100e;
+    --panel: #191714;
+    --panel-raised: #211e19;
+    --text: #eee9df;
+    --muted: #a39b8d;
+    --gold: #d6b36a;
+    --gold-soft: #927641;
+    --line: #373128;
+    --success: #a6c48a;
+    --danger: #e5a49a;
+    --radius: 14px;
   }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui,sans-serif; }
-  main { max-width:1000px; margin:0 auto; padding:20px 16px 48px; }
-  h1 { font-size:1.4rem; margin:0 0 4px; color:var(--gold); }
-  .sub { color:var(--dim); margin:0 0 16px; font-size:.9rem; }
-  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-  input, select { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:9px 10px; font:inherit; }
-  input { flex:1 1 240px; }
-  select { flex:0 1 200px; }
-  .anz { color:var(--dim); font-size:.85rem; margin:6px 0 10px; }
-  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
-  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); cursor:pointer; user-select:none; }
-  tr:last-child td { border-bottom:0; }
-  a { color:var(--gold); }
-  .klein { color:var(--dim); font-size:.82rem; }
-  .mehr { color:var(--gold); font-size:.78rem; }
-  @media (max-width:640px) {
-    table, tbody, tr, td { display:block; }
-    thead { display:none; }
-    tr { border-bottom:1px solid var(--line); padding:8px 0; }
-    td { border:0; padding:2px 10px; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 50% -25%, #3a2d19 0, transparent 46%), var(--bg);
+    color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: var(--gold); }
+  button, input, select { font: inherit; }
+  .wrap { width: min(1160px, calc(100% - 32px)); margin: 0 auto; }
+  header { padding: 48px 0 28px; }
+  .eyebrow { margin: 0 0 9px; color: var(--gold); font-size: .74rem; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+  h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1.05; letter-spacing: -.045em; }
+  .intro { max-width: 760px; margin: 14px 0 0; color: var(--muted); font-size: 1.03rem; }
+  .intro strong { color: var(--text); font-weight: 600; }
+  .topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .82rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 12px #a6c48a77; }
+  .github { color: var(--muted); font-size: .88rem; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .search-panel { padding: 17px; border: 1px solid var(--line); border-radius: var(--radius); background: #191714eF; box-shadow: 0 18px 55px #0004; }
+  .search-row { display: grid; grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(145px, 1fr)) auto; gap: 9px; }
+  .control { width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; outline: none; background: var(--panel-raised); color: var(--text); }
+  .control:focus { border-color: var(--gold); box-shadow: 0 0 0 3px #d6b36a25; }
+  .control::placeholder { color: #847d71; }
+  .reset { min-height: 46px; padding: 0 14px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
+  .reset:hover { border-color: var(--gold-soft); color: var(--text); }
+  .search-hint { margin: 9px 2px 0; color: var(--muted); font-size: .8rem; }
+  .result-head { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin: 26px 2px 11px; }
+  .result-title { margin: 0; font-size: 1.13rem; font-weight: 680; }
+  .count { margin: 3px 0 0; color: var(--muted); font-size: .87rem; }
+  .sort-note { color: var(--muted); font-size: .78rem; }
+  .table-shell { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 12px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { background: #211e19; color: var(--muted); font-size: .73rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  th button { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+  th button:hover, th button:focus-visible { color: var(--gold); }
+  tbody tr:hover { background: #ffffff06; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .streamer { min-width: 118px; font-weight: 650; }
+  .date { min-width: 104px; color: var(--muted); white-space: nowrap; }
+  .boss { min-width: 150px; color: var(--gold); font-weight: 700; }
+  .interpretations { min-width: 250px; color: #c9c1b4; font-size: .86rem; }
+  .interpretations div + div { margin-top: 4px; }
+  .confidence { display: inline-block; margin-top: 5px; color: var(--muted); font-size: .72rem; }
+  .video { min-width: 116px; white-space: nowrap; }
+  .video a { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; font-weight: 650; }
+  .video a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .play { color: var(--gold); }
+  .empty { padding: 42px 18px; color: var(--muted); text-align: center; }
+  .error { color: var(--danger); }
+  .pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 13px; border-top: 1px solid var(--line); }
+  .pager button { min-height: 36px; padding: 5px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-raised); color: var(--text); cursor: pointer; }
+  .pager button:hover:not(:disabled) { border-color: var(--gold-soft); }
+  .pager button:disabled { opacity: .4; cursor: default; }
+  .page-label { min-width: 100px; color: var(--muted); font-size: .84rem; text-align: center; }
+  footer { display: flex; justify-content: space-between; gap: 20px; padding: 22px 2px 38px; color: var(--muted); font-size: .79rem; }
+  footer p { max-width: 680px; margin: 0; }
+  @media (max-width: 900px) {
+    .search-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .search-row .query { grid-column: 1 / -1; }
+  }
+  @media (max-width: 640px) {
+    .wrap { width: min(100% - 22px, 560px); }
+    header { padding-top: 31px; }
+    .topline { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .search-panel { padding: 12px; }
+    .search-row { grid-template-columns: 1fr; }
+    .search-row .query { grid-column: auto; }
+    .result-head { align-items: flex-start; flex-direction: column; gap: 2px; }
+    .sort-note { display: none; }
+    .table-shell { border: 0; background: transparent; overflow: visible; }
+    table, tbody, tr, td { display: block; width: 100%; }
+    thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+    tbody { display: grid; gap: 10px; }
+    tbody tr { padding: 12px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+    td { padding: 3px 0; border: 0; }
+    td.streamer { display: inline; min-width: 0; }
+    td.date { display: inline; min-width: 0; margin-left: 8px; font-size: .82rem; }
+    td.boss { min-width: 0; padding-top: 7px; font-size: 1.03rem; }
+    td.interpretations { min-width: 0; padding-top: 3px; }
+    td.video { min-width: 0; padding-top: 8px; }
+    footer { flex-direction: column; gap: 9px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .control, .reset, .pager button { transition: border-color .15s ease, box-shadow .15s ease, color .15s ease; }
   }
 </style>
 </head>
 <body>
-<main>
-  <h1>DSR-Archiv</h1>
-  <p class="sub">Bosskämpfe in Dark-Souls-Remastered-Randomizer-Streams. Gesucht wird nach dem Namen an der Lebensleiste. Der Randomizer zeigt dort manchmal den Namen des Original-Platzes, manchmal den des Ersatz-Gegners. Deshalb stehen bei jedem Treffer die möglichen Deutungen.</p>
-  <div class="bar">
-    <input id="q" type="search" placeholder="Suche: Name an der Leiste, Gegner, Streamer, Gebiet …" autofocus>
-    <select id="streamer"><option value="">Alle Streamer</option></select>
-    <select id="gebiet"><option value="">Alle Gebiete</option></select>
+<header class="wrap">
+  <p class="eyebrow">Dark Souls Remastered · Randomizer</p>
+  <h1>Bosskämpfe wiederfinden.</h1>
+  <p class="intro">Das DSR-Archiv sammelt erkannte Bosskämpfe aus Twitch-Aufzeichnungen. Suche nach <strong>Boss, Streamer, Gebiet oder Videotitel</strong> und springe direkt zum Zeitstempel.</p>
+  <div class="topline">
+    <span class="badge"><span class="dot" aria-hidden="true"></span><span id="dataset-status">Archiv wird geladen …</span></span>
+    <a class="github" href="https://github.com/spidy666/DSRArchive" target="_blank" rel="noopener noreferrer">Projekt auf GitHub ↗</a>
   </div>
-  <div class="anz" id="anz"></div>
-  <table>
-    <thead><tr><th data-k="streamer">Streamer</th><th data-k="datum">Datum</th><th data-k="boss">Name an der Leiste</th><th>Mögliche Zuordnung</th><th>Video</th></tr></thead>
-    <tbody id="body"></tbody>
-  </table>
-  <p class="sub" id="stand"></p>
+</header>
+
+<main class="wrap">
+  <section class="search-panel" aria-label="Archiv durchsuchen">
+    <div class="search-row">
+      <input class="control query" id="q" type="search" placeholder="Boss, Gegner, Streamer, Gebiet oder Titel …" autocomplete="off" aria-label="Suchbegriff">
+      <select class="control" id="streamer" aria-label="Nach Streamer filtern"><option value="">Alle Streamer</option></select>
+      <select class="control" id="boss" aria-label="Nach Boss filtern"><option value="">Alle Bossnamen</option></select>
+      <select class="control" id="gebiet" aria-label="Nach Gebiet filtern"><option value="">Alle Gebiete</option></select>
+      <button class="reset" id="reset" type="button">Zurücksetzen</button>
+    </div>
+    <p class="search-hint">Die Suche ignoriert Groß-/Kleinschreibung und Umlaute. Treffer lassen sich über die Spaltenüberschriften sortieren.</p>
+  </section>
+
+  <section aria-label="Suchergebnisse">
+    <div class="result-head">
+      <div>
+        <h2 class="result-title">Archiv</h2>
+        <p class="count" id="count" aria-live="polite">Daten werden geladen …</p>
+      </div>
+      <span class="sort-note" id="sort-note">Neueste zuerst · 50 Einträge pro Seite</span>
+    </div>
+    <div class="table-shell">
+      <table>
+        <thead><tr>
+          <th scope="col" aria-sort="none"><button type="button" data-sort="streamer">Streamer</button></th>
+          <th scope="col" aria-sort="descending"><button type="button" data-sort="datum">Datum</button></th>
+          <th scope="col" aria-sort="none"><button type="button" data-sort="boss">Name an der Leiste</button></th>
+          <th scope="col">Mögliche Zuordnung</th>
+          <th scope="col">Video</th>
+        </tr></thead>
+        <tbody id="results"><tr><td class="empty" colspan="5">Archiv wird geladen …</td></tr></tbody>
+      </table>
+      <nav class="pager" id="pager" aria-label="Ergebnisseiten" hidden>
+        <button id="prev" type="button">← Zurück</button>
+        <span class="page-label" id="page-label"></span>
+        <button id="next" type="button">Weiter →</button>
+      </nav>
+    </div>
+  </section>
+
+  <footer>
+    <p>Die Einträge stammen aus automatischer Texterkennung. Sie bedeuten, dass ein Bossname an der Lebensleiste erkannt wurde; ein Sieg wird nicht bestätigt. Twitch kann alte Aufzeichnungen entfernen.</p>
+    <p id="updated">Datenstand: wird geladen</p>
+  </footer>
 </main>
+
 <script>
 (function () {
   "use strict";
-  var daten = [], sortKey = "streamer";
+  var PAGE_SIZE = 50;
+  var daten = [];
+  var treffer = [];
+  var seite = 1;
+  var sortKey = "datum";
+  var sortDirection = -1;
   var $ = function (id) { return document.getElementById(id); };
-  // Umlaute und Groß-/Kleinschreibung ignorieren
-  function norm(s) { return String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
-  function zeit(s) { var h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
-    return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0"); }
-  function td(tr, text) { var c = document.createElement("td"); c.textContent = text; tr.appendChild(c); return c; }
 
-  function fuellen(sel, werte) {
-    werte.sort().forEach(function (w) { var o = document.createElement("option"); o.value = w; o.textContent = w; sel.appendChild(o); });
+  function norm(value) {
+    return String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("de");
   }
 
-  function zeigen() {
-    var q = norm($("q").value), s = $("streamer").value, g = $("gebiet").value;
-    var liste = daten.filter(function (d) {
-      if (s && d.streamer !== s) return false;
-      if (g && d.gebiet.split(" / ").indexOf(g) < 0) return false;
-      return !q || norm([d.streamer, d.boss, d.gebiet, d.gegner, d.titel].concat(d.deutungen).join(" ")).indexOf(q) >= 0;
-    }).sort(function (a, b) { return String(a[sortKey]).localeCompare(String(b[sortKey]), "de") || a.start_s - b.start_s; });
-    var body = $("body"); body.textContent = "";
-    liste.forEach(function (d) {
-      var tr = document.createElement("tr");
-      td(tr, d.streamer);
-      td(tr, d.datum || "");
-      td(tr, d.boss);
-      var rc = document.createElement("td");
-      d.deutungen.forEach(function (t) { var z = document.createElement("div"); z.textContent = t; rc.appendChild(z); });
-      if (d.deutungen.length > 1) { var m = document.createElement("div"); m.className = "mehr"; m.textContent = "Zuordnung unsicher, mehrere Möglichkeiten"; rc.appendChild(m); }
-      tr.appendChild(rc);
-      var v = document.createElement("td");
-      if (d.link && /^https:\/\/www\.twitch\.tv\//.test(d.link)) {
-        var a = document.createElement("a"); a.href = d.link; a.target = "_blank"; a.rel = "noopener noreferrer";
-        a.textContent = "ab " + zeit(d.start_s); v.appendChild(a);
-      } else { v.textContent = zeit(d.start_s); }
-      tr.appendChild(v); body.appendChild(tr);
+  function zeit(seconds) {
+    var value = Math.max(0, Number(seconds) || 0);
+    var hours = Math.floor(value / 3600);
+    var minutes = Math.floor(value / 60) % 60;
+    var rest = Math.floor(value % 60);
+    return (hours ? hours + ":" + String(minutes).padStart(2, "0") : String(minutes)) + ":" + String(rest).padStart(2, "0");
+  }
+
+  function zelle(row, text, className) {
+    var cell = document.createElement("td");
+    cell.textContent = text || "";
+    if (className) cell.className = className;
+    row.appendChild(cell);
+    return cell;
+  }
+
+  function optionen(id, values, label) {
+    var select = $(id);
+    Array.from(new Set(values.filter(Boolean))).sort(function (a, b) { return a.localeCompare(b, "de"); })
+      .forEach(function (value) {
+        var option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+    select.setAttribute("aria-label", label);
+  }
+
+  function sortieren(a, b) {
+    var left = a[sortKey] || "";
+    var right = b[sortKey] || "";
+    var result;
+    if (sortKey === "start_s" || sortKey === "treffer") result = (Number(left) || 0) - (Number(right) || 0);
+    else result = String(left).localeCompare(String(right), "de", {numeric: true, sensitivity: "base"});
+    if (!result && sortKey !== "start_s") result = (Number(a.start_s) || 0) - (Number(b.start_s) || 0);
+    return result * sortDirection;
+  }
+
+  function filtern() {
+    var query = norm($("q").value.trim());
+    var streamer = $("streamer").value;
+    var boss = $("boss").value;
+    var gebiet = $("gebiet").value;
+    treffer = daten.filter(function (entry) {
+      if (streamer && entry.streamer !== streamer) return false;
+      if (boss && entry.boss !== boss) return false;
+      if (gebiet && String(entry.gebiet || "").split(" / ").indexOf(gebiet) < 0) return false;
+      if (!query) return true;
+      var suchtext = [entry.streamer, entry.boss, entry.gebiet, entry.gegner, entry.titel]
+        .concat(Array.isArray(entry.deutungen) ? entry.deutungen : []).join(" ");
+      return norm(suchtext).indexOf(query) >= 0;
+    }).sort(sortieren);
+    seite = 1;
+    anzeigen();
+  }
+
+  function videoZelle(row, entry) {
+    var cell = document.createElement("td");
+    cell.className = "video";
+    var url;
+    try { url = new URL(entry.link); } catch (_) { url = null; }
+    if (url && url.protocol === "https:" && (url.hostname === "www.twitch.tv" || url.hostname === "twitch.tv")) {
+      var link = document.createElement("a");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      var icon = document.createElement("span");
+      icon.className = "play";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = "▶";
+      link.appendChild(icon);
+      link.appendChild(document.createTextNode(" ab " + zeit(entry.start_s)));
+      cell.appendChild(link);
+    } else {
+      cell.textContent = "ab " + zeit(entry.start_s);
+    }
+    row.appendChild(cell);
+  }
+
+  function anzeigen() {
+    var body = $("results");
+    body.textContent = "";
+    $("count").textContent = treffer.length.toLocaleString("de") + " von " + daten.length.toLocaleString("de") + " Kämpfen";
+
+    if (!treffer.length) {
+      var emptyRow = document.createElement("tr");
+      var emptyCell = document.createElement("td");
+      emptyCell.className = "empty";
+      emptyCell.colSpan = 5;
+      emptyCell.textContent = "Keine passenden Einträge gefunden. Passe die Suche oder Filter an.";
+      emptyRow.appendChild(emptyCell);
+      body.appendChild(emptyRow);
+      $("pager").hidden = true;
+      return;
+    }
+
+    var pages = Math.ceil(treffer.length / PAGE_SIZE);
+    var start = (seite - 1) * PAGE_SIZE;
+    treffer.slice(start, start + PAGE_SIZE).forEach(function (entry) {
+      var row = document.createElement("tr");
+      zelle(row, entry.streamer, "streamer");
+      zelle(row, entry.datum || "—", "date");
+      zelle(row, entry.boss || "Unbekannt", "boss");
+      var interpretations = zelle(row, "", "interpretations");
+      (Array.isArray(entry.deutungen) ? entry.deutungen : []).forEach(function (text) {
+        var line = document.createElement("div");
+        line.textContent = text;
+        interpretations.appendChild(line);
+      });
+      if (entry.konfidenz !== null && entry.konfidenz !== undefined) {
+        var confidence = document.createElement("span");
+        confidence.className = "confidence";
+        confidence.textContent = "OCR-Konfidenz " + Math.round(Number(entry.konfidenz) * 100) + "%";
+        interpretations.appendChild(confidence);
+      }
+      videoZelle(row, entry);
+      body.appendChild(row);
     });
-    $("anz").textContent = liste.length + " von " + daten.length + " Kämpfen";
+
+    $("pager").hidden = pages < 2;
+    $("prev").disabled = seite <= 1;
+    $("next").disabled = seite >= pages;
+    $("page-label").textContent = "Seite " + seite + " von " + pages;
   }
 
-  fetch("kaempfe.json").then(function (r) { return r.json(); }).then(function (j) {
-    daten = j.kaempfe || [];
-    fuellen($("streamer"), Array.from(new Set(daten.map(function (d) { return d.streamer; }))));
-    var gebiete = new Set(); daten.forEach(function (d) { d.gebiet.split(" / ").forEach(function (x) { gebiete.add(x); }); });
-    fuellen($("gebiet"), Array.from(gebiete));
-    $("stand").textContent = "Stand: " + (j.stand || "unbekannt") + ". Die Treffer stammen aus automatischer Texterkennung und können Fehler enthalten. Twitch löscht alte Videos, einzelne Links können ins Leere führen.";
-    zeigen();
-  }).catch(function () { $("anz").textContent = "Daten konnten nicht geladen werden."; });
+  function sortEvents() {
+    document.querySelectorAll("th[aria-sort]").forEach(function (th) {
+      var button = th.querySelector("button[data-sort]");
+      th.setAttribute("aria-sort", button && button.dataset.sort === sortKey
+        ? (sortDirection > 0 ? "ascending" : "descending") : "none");
+    });
+    filtern();
+  }
 
-  $("q").addEventListener("input", zeigen); $("streamer").addEventListener("change", zeigen); $("gebiet").addEventListener("change", zeigen);
-  document.querySelectorAll("th[data-k]").forEach(function (th) { th.addEventListener("click", function () { sortKey = th.dataset.k; zeigen(); }); });
+  $("q").addEventListener("input", filtern);
+  ["streamer", "boss", "gebiet"].forEach(function (id) { $(id).addEventListener("change", filtern); });
+  $("reset").addEventListener("click", function () {
+    $("q").value = "";
+    ["streamer", "boss", "gebiet"].forEach(function (id) { $(id).value = ""; });
+    filtern();
+    $("q").focus();
+  });
+  $("prev").addEventListener("click", function () { if (seite > 1) { seite -= 1; anzeigen(); } });
+  $("next").addEventListener("click", function () {
+    if (seite < Math.ceil(treffer.length / PAGE_SIZE)) { seite += 1; anzeigen(); }
+  });
+  document.querySelectorAll("button[data-sort]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      if (sortKey === button.dataset.sort) sortDirection *= -1;
+      else { sortKey = button.dataset.sort; sortDirection = sortKey === "datum" ? -1 : 1; }
+      sortEvents();
+    });
+  });
+
+  fetch("./kaempfe.json")
+    .then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    })
+    .then(function (json) {
+      if (!json || !Array.isArray(json.kaempfe)) throw new Error("Ungültiges Datenformat");
+      daten = json.kaempfe;
+      optionen("streamer", daten.map(function (entry) { return entry.streamer; }), "Nach Streamer filtern");
+      optionen("boss", daten.map(function (entry) { return entry.boss; }), "Nach Bossnamen filtern");
+      var gebiete = [];
+      daten.forEach(function (entry) { gebiete = gebiete.concat(String(entry.gebiet || "").split(" / ")); });
+      optionen("gebiet", gebiete, "Nach Gebiet filtern");
+      $("dataset-status").textContent = daten.length.toLocaleString("de") + " erkannte Kämpfe · " + new Set(daten.map(function (entry) { return entry.streamer; })).size + " Streamer";
+      $("updated").textContent = "Datenstand: " + (json.stand || "unbekannt");
+      sortEvents();
+    })
+    .catch(function () {
+      $("dataset-status").textContent = "Archivdaten nicht verfügbar";
+      $("dataset-status").parentElement.classList.add("error");
+      $("count").textContent = "Die Datenbank konnte nicht geladen werden.";
+      $("updated").textContent = "Bitte später erneut laden.";
+      var row = document.createElement("tr");
+      var cell = document.createElement("td");
+      cell.className = "empty error";
+      cell.colSpan = 5;
+      cell.textContent = "Daten konnten nicht geladen werden. Bitte Seite neu laden oder den GitHub-Projektlink verwenden.";
+      row.appendChild(cell);
+      $("results").appendChild(row);
+    });
 })();
 </script>
 </body>
