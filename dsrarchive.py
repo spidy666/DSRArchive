@@ -14,6 +14,7 @@ im PATH (für deutschen Spieltext die Sprachdatei deu), für Adressen zusätzlic
 """
 import argparse, difflib, io, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
 from datetime import datetime
+from pathlib import Path
 
 from PIL import Image, ImageFilter
 
@@ -22,7 +23,15 @@ BREITE_MAX = 1920  # größte Breite, auf die der durchsuchte Bildbereich hochsk
 VOLLSUCHE_ALLE = 6 # bei bekannter Namensposition nur jede n-te Stichprobe das ganze Bild durchsuchen
 BEREICH_Y = 0.55   # durchsucht wird der untere Teil des Bildes ab dieser Höhe (0..1)
 LINK_VORLAUF = 10  # Sekunden vor Kampfbeginn, auf die der Link zeigt
-TMP = tempfile.mkdtemp(prefix="dsrarchiv_")
+TMP = None
+
+
+def temp_verzeichnis():
+    """Erzeugt das Arbeitsverzeichnis erst beim ersten Video-/OCR-Aufruf."""
+    global TMP
+    if TMP is None:
+        TMP = tempfile.mkdtemp(prefix="dsrarchiv_")
+    return TMP
 
 # Bildfilter: Texterkennung klappt je nach Hintergrund mit anderem Filter besser,
 # darum werden mehrere probiert und der beste Namenstreffer gewinnt.
@@ -204,8 +213,9 @@ def umgeben_von_text(alle, box, groesse):
 # ---------------------------------------------------------------- Texterkennung
 def tesseract_zeilen(pfad, sprache, psm):
     """Wörter mit Position, nach Textzeile gruppiert."""
-    r = subprocess.run(["tesseract", pfad, "stdout", "-l", sprache, "--psm", str(psm), "tsv"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = _run_checked(["tesseract", pfad, "stdout", "-l", sprache, "--psm", str(psm), "tsv"],
+                     "Tesseract", timeout=60,
+                     capture_output=True, text=True, encoding="utf-8", errors="replace")
     zeilen = {}
     for l in r.stdout.splitlines()[1:]:
         p = l.split("\t")
@@ -224,7 +234,7 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
     for vname, filt in VARIANTEN.items():
         if varianten and vname not in varianten:
             continue
-        pfad = os.path.join(TMP, "f.png")
+        pfad = os.path.join(temp_verzeichnis(), "f.png")
         filt(img).save(pfad)
         zeilen = tesseract_zeilen(pfad, sprache, psm)
         alle = [w for ws in zeilen.values() for w in ws]
@@ -255,12 +265,33 @@ def finde_namen(img, namen, sprache, schwelle, psm=11, varianten=None):
 
 
 # ---------------------------------------------------------------- Video lesen
+def _run_checked(cmd, werkzeug, timeout, **kwargs):
+    """Führt ein externes Programm mit Zeitlimit und verständlicher Fehlermeldung aus."""
+    try:
+        r = subprocess.run(cmd, timeout=timeout, **kwargs)
+    except FileNotFoundError as e:
+        raise RuntimeError(f"{werkzeug} wurde nicht gefunden ({cmd[0]}).") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"{werkzeug} hat das Zeitlimit von {timeout} s überschritten.") from e
+    if r.returncode:
+        fehler = getattr(r, "stderr", None)
+        if isinstance(fehler, bytes):
+            fehler = fehler.decode("utf-8", errors="replace")
+        fehler = (fehler or "").strip()
+        raise RuntimeError(f"{werkzeug} wurde mit Status {r.returncode} beendet"
+                           + (f": {fehler[-800:]}" if fehler else "."))
+    return r
+
+
 def video_info(quelle):
-    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                        "stream=width,height:format=duration", "-of", "json", quelle],
-                       capture_output=True, text=True)
-    d = json.loads(r.stdout)
-    s = d["streams"][0]
+    r = _run_checked(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                      "stream=width,height:format=duration", "-of", "json", quelle],
+                     "ffprobe", timeout=120, capture_output=True, text=True)
+    try:
+        d = json.loads(r.stdout)
+        s = d["streams"][0]
+    except (ValueError, KeyError, IndexError, TypeError) as e:
+        raise RuntimeError("ffprobe lieferte keine gültigen Video-Metadaten.") from e
     return s["width"], s["height"], float(d.get("format", {}).get("duration") or 0)
 
 
@@ -288,9 +319,9 @@ def _lies(f, n):
 
 def schluesselbild_abstand(quelle):
     """Mittlerer Abstand der Schlüsselbilder in den ersten 2 Minuten (Sekunden), None wenn unbekannt."""
-    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+120",
-                        "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", quelle],
-                       capture_output=True, text=True)
+    r = _run_checked(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+120",
+                      "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", quelle],
+                     "ffprobe", timeout=120, capture_output=True, text=True)
     zeiten = []
     for l in r.stdout.splitlines():
         p = l.split(",")
@@ -312,7 +343,7 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
     (Zeitstempel bleiben die des ganzen Videos). Ohne Angabe wird alles gelesen.
     """
     vf, b, sh = _vf(w, h)
-    logpfad = os.path.join(TMP, "ffmpeg.log")
+    logpfad = os.path.join(temp_verzeichnis(), "ffmpeg.log")
     zeiten.clear()
     for ab, bis in (bereiche or [(None, None)]):
         vorn = ["-ss", str(ab), "-t", str(bis - ab), "-copyts"] if ab is not None else []
@@ -321,15 +352,33 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
                "-vf", f"select='eq(n,0)+gt(floor(t/{intervall}),floor(prev_selected_t/{intervall}))',showinfo,{vf}",
                "-fps_mode", "vfr", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
         with open(logpfad, "wb") as log:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
+            try:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log)
+            except FileNotFoundError as e:
+                raise RuntimeError("FFmpeg wurde nicht gefunden (ffmpeg).") from e
+            vollstaendig = False
             try:
                 while True:
                     daten = _lies(p.stdout, b * sh * 3)
                     if daten is None:
+                        vollstaendig = True
                         break
                     yield Image.frombytes("RGB", (b, sh), daten)
             finally:
-                p.kill()
+                if not vollstaendig and p.poll() is None:
+                    p.terminate()
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    p.wait()
+                if p.stdout:
+                    p.stdout.close()
+            if p.returncode:
+                with open(logpfad, encoding="utf-8", errors="replace") as f:
+                    fehler = f.read().strip()
+                raise RuntimeError("FFmpeg konnte die Videobilder nicht dekodieren"
+                                   + (f": {fehler[-800:]}" if fehler else "."))
         for l in open(logpfad, encoding="utf-8", errors="replace"):
             m = re.search(r"Parsed_showinfo.*?pts_time:\s*([0-9.]+)", l)
             if m:
@@ -338,9 +387,9 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
 
 def bild_bei(quelle, w, h, t):
     vf, b, sh = _vf(w, h)
-    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(max(0, t)), "-i", quelle,
-                        "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                       capture_output=True)
+    r = _run_checked(["ffmpeg", "-v", "error", "-ss", str(max(0, t)), "-i", quelle,
+                      "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                     "FFmpeg", timeout=60, capture_output=True)
     if len(r.stdout) < b * sh * 3:
         return None
     return Image.frombytes("RGB", (b, sh), r.stdout[:b * sh * 3])
@@ -433,6 +482,7 @@ def hms(sek):
 def db_oeffnen(pfad):
     os.makedirs(os.path.dirname(os.path.abspath(pfad)), exist_ok=True)
     db = sqlite3.connect(pfad)
+    db.execute("PRAGMA foreign_keys=ON")
     db.executescript("""
     CREATE TABLE IF NOT EXISTS videos (
         id INTEGER PRIMARY KEY, quelle TEXT UNIQUE, streamer TEXT, twitch_id TEXT,
@@ -445,6 +495,51 @@ def db_oeffnen(pfad):
     if "datum" not in [r[1] for r in db.execute("PRAGMA table_info(videos)")]:   # ältere Datenbanken ergänzen
         db.execute("ALTER TABLE videos ADD COLUMN datum TEXT")
     return db
+
+
+def db_lesen(pfad):
+    """Öffnet eine vorhandene Datenbank strikt lesend, ohne Schema anzulegen oder zu migrieren."""
+    uri = Path(pfad).resolve().as_uri() + "?mode=ro"
+    db = sqlite3.connect(uri, uri=True)
+    db.execute("PRAGMA foreign_keys=ON")
+    return db
+
+
+def scan_speichern(pfad, quelle, alt, streamer, titel, tid, dauer, datum, modus, kaempfe):
+    """Ersetzt Video und Treffer in einer einzigen Transaktion."""
+    db = db_oeffnen(pfad)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if alt:
+            db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
+            db.execute("DELETE FROM videos WHERE id=?", alt)
+        cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum) "
+                         "VALUES(?,?,?,?,?,?,?,?)",
+                         (quelle, streamer, tid, titel, modus, dauer,
+                          datetime.now().isoformat(timespec="seconds"), datum))
+        vid = cur.lastrowid
+        for k in kaempfe:
+            kand = [dict(c, anzeige=k["name"]) for c in k["kandidaten"]]
+            gebiete = list(dict.fromkeys(c["gebiet"] for c in kand))
+            gegner = list(dict.fromkeys(gegner_text(c) for c in kand))
+            db.execute("INSERT INTO kaempfe(video_id,platz,boss,gebiet,rando_de,rando_en,kandidaten,"
+                       "start_s,ende_s,konfidenz,treffer) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                       (vid, k["key"], k["name"], " / ".join(gebiete), "", " / ".join(gegner),
+                        json.dumps(kand, ensure_ascii=False), k["start"], k["ende"],
+                        round(k["score"], 3), k["treffer"]))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    for k in kaempfe:
+        kand = [dict(c, anzeige=k["name"]) for c in k["kandidaten"]]
+        print(f"{hms(k['start'])}–{hms(k['ende'])}  Leiste: {k['name']}  ({k['treffer']} Treffer"
+              + (f", Versuch {k['versuch']}/{k['versuche']}" if k.get("versuch") else "") + ")"
+              + (f"   {zeit_link(tid, k['start'] - LINK_VORLAUF)}" if tid else ""))
+        for c in kand:
+            print("      mögliche Deutung:", deutung_text(c))
 
 
 def quelle_aufloesen(quelle, a):
@@ -482,14 +577,14 @@ def scan(a):
     LEISTENPRUEFUNG = not a.ohne_leistenpruefung
     namen = lade_namen(a.namen, a.auch_deutsch)
     db = db_oeffnen(a.db)
-    alt = db.execute("SELECT id FROM videos WHERE quelle=?", (a.quelle,)).fetchone()
+    try:
+        alt = db.execute("SELECT id FROM videos WHERE quelle=?", (a.quelle,)).fetchone()
+    finally:
+        db.close()
     if alt and not a.neu:
         print("Schon in der Datenbank, übersprungen (--neu zum erneuten Auswerten).")
         return
     src, streamer, titel, tid, kapitel, datum = quelle_aufloesen(a.quelle, a)
-    if alt:
-        db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
-        db.execute("DELETE FROM videos WHERE id=?", alt)
     w, h, dauer = video_info(src)
     print(f"{streamer}: {titel} ({w}x{h}, {hms(dauer)}), Twitch-ID: {tid or 'unbekannt'}, Datum: {datum or 'unbekannt'}")
     treffer, zeiten, kal, vollsuchen, streifen, voll = [], [], None, 0, 0, set()
@@ -584,32 +679,18 @@ def scan(a):
     print(f"Auswertung: {len(zeiten) or 'ca. ' + str(int(dauer / a.intervall))} Stichproben, "
           f"{vollsuchen} volle Suchen, {streifen} Streifen-Suchen, {time.time() - t0:.0f} s",
           file=sys.stderr)
-    cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum) "
-                     "VALUES(?,?,?,?,?,?,?,?)",
-                     (a.quelle, streamer, tid, titel, a.modus, dauer, datetime.now().isoformat(timespec="seconds"), datum))
-    vid = cur.lastrowid
-    for k in kaempfe:
-        kand = [dict(c, anzeige=k["name"]) for c in k["kandidaten"]]
-        gebiete = list(dict.fromkeys(c["gebiet"] for c in kand))
-        gegner = list(dict.fromkeys(gegner_text(c) for c in kand))
-        db.execute("INSERT INTO kaempfe(video_id,platz,boss,gebiet,rando_de,rando_en,kandidaten,"
-                   "start_s,ende_s,konfidenz,treffer) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                   (vid, k["key"], k["name"], " / ".join(gebiete), "", " / ".join(gegner),
-                    json.dumps(kand, ensure_ascii=False), k["start"], k["ende"], round(k["score"], 3), k["treffer"]))
-        print(f"{hms(k['start'])}–{hms(k['ende'])}  Leiste: {k['name']}  ({k['treffer']} Treffer"
-              + (f", Versuch {k['versuch']}/{k['versuche']}" if k.get("versuch") else "") + ")"
-              + (f"   {zeit_link(tid, k['start'] - LINK_VORLAUF)}" if tid else ""))
-        for c in kand:
-            print("      mögliche Deutung:", deutung_text(c))
-    db.commit()
+    scan_speichern(a.db, a.quelle, alt, streamer, titel, tid, dauer, datum, a.modus, kaempfe)
     print(f"{len(kaempfe)} Kämpfe gespeichert.")
 
 
 def zeilen_aus_db(db):
     out = []
-    for r in db.execute("SELECT v.streamer, v.titel, v.twitch_id, v.modus, k.boss, k.gebiet, k.rando_de,"
-                        " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer, v.datum FROM kaempfe k"
-                        " JOIN videos v ON v.id=k.video_id ORDER BY v.streamer, v.id, k.start_s"):
+    video_spalten = {r[1] for r in db.execute("PRAGMA table_info(videos)")}
+    datum_spalte = "v.datum" if "datum" in video_spalten else "NULL"
+    abfrage = ("SELECT v.streamer, v.titel, v.twitch_id, v.modus, k.boss, k.gebiet, k.rando_de,"
+               " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer, " + datum_spalte +
+               " FROM kaempfe k JOIN videos v ON v.id=k.video_id ORDER BY v.streamer, v.id, k.start_s")
+    for r in db.execute(abfrage):
         s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand, ende, treffer, datum = r
         kand = json.loads(kand)
         out.append({"streamer": s, "datum": datum, "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
@@ -621,8 +702,11 @@ def zeilen_aus_db(db):
 
 
 def export(a):
-    db = db_oeffnen(a.db)
-    zeilen = zeilen_aus_db(db)
+    db = db_lesen(a.db)
+    try:
+        zeilen = zeilen_aus_db(db)
+    finally:
+        db.close()
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     json.dump({"stand": datetime.now().strftime("%Y-%m-%d"), "kaempfe": zeilen},
               open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -632,7 +716,12 @@ def export(a):
 def suche(a):
     t = norm(a.text)
     zeilen = []
-    for z in zeilen_aus_db(db_oeffnen(a.db)):
+    db = db_lesen(a.db)
+    try:
+        ergebnisse = zeilen_aus_db(db)
+    finally:
+        db.close()
+    for z in ergebnisse:
         if t in norm(" ".join([z["streamer"], z["boss"], z["gebiet"], z["gegner"]] + z["deutungen"])):
             zeilen.append(f"{z['streamer']:<12} {z['datum'] or '??'} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
             zeilen += ["       " + d for d in z["deutungen"]]
@@ -838,10 +927,13 @@ def clips(a):
     global LEISTENPRUEFUNG
     LEISTENPRUEFUNG = True
     namen = lade_namen(a.namen)
-    db = db_oeffnen(a.db)
-    zeilen = db.execute("SELECT v.quelle, v.streamer, v.twitch_id, k.boss, k.platz, k.start_s, k.ende_s "
-                        "FROM kaempfe k JOIN videos v ON v.id=k.video_id WHERE v.quelle LIKE 'http%' "
-                        "ORDER BY v.id, k.start_s").fetchall()
+    db = db_lesen(a.db)
+    try:
+        zeilen = db.execute("SELECT v.quelle, v.streamer, v.twitch_id, k.boss, k.platz, k.start_s, k.ende_s "
+                            "FROM kaempfe k JOIN videos v ON v.id=k.video_id WHERE v.quelle LIKE 'http%' "
+                            "ORDER BY v.id, k.start_s").fetchall()
+    finally:
+        db.close()
     if a.streamer:
         zeilen = [z for z in zeilen if a.streamer.lower() in z[1].lower()]
     if a.boss:
@@ -894,10 +986,15 @@ def clips(a):
 def abdeckung(a):
     """Zeigt für jeden Boss-Platz (5 Punkte), ob schon ein Kampf in der Datenbank dazu passt.
     Ein Kampf zählt für jeden Platz, den seine Deutungen nennen (bei mehrdeutigen Namen für mehrere)."""
-    db = db_oeffnen(a.db)
     plaetze = [r for r in json.load(open(a.namen, encoding="utf-8")) if r["pts"] >= 5]
     zaehl = {r["key"]: [0, set()] for r in plaetze}
-    for kand, tid in db.execute("SELECT k.kandidaten, v.twitch_id FROM kaempfe k JOIN videos v ON v.id=k.video_id"):
+    db = db_lesen(a.db)
+    try:
+        kaempfe = db.execute("SELECT k.kandidaten, v.twitch_id FROM kaempfe k "
+                             "JOIN videos v ON v.id=k.video_id").fetchall()
+    finally:
+        db.close()
+    for kand, tid in kaempfe:
         for p in {c["platz"] for c in json.loads(kand)}:
             if p in zaehl:
                 zaehl[p][0] += 1
@@ -914,32 +1011,39 @@ def bereinigen(a):
     """Entfernt Einträge von lokalen Test-Dateien (Quelle ist keine Twitch-Adresse). Sie würden sonst
     neben dem späteren Gesamtlauf desselben Videos doppelt erscheinen."""
     db = db_oeffnen(a.db)
-    alt = db.execute("SELECT id, quelle FROM videos WHERE quelle NOT LIKE 'http%'").fetchall()
-    for vid, q in alt:
-        n = db.execute("DELETE FROM kaempfe WHERE video_id=?", (vid,)).rowcount
-        db.execute("DELETE FROM videos WHERE id=?", (vid,))
-        print(f"entfernt: {q} ({n} Kämpfe)")
-    # Kämpfe mit Namen, die nach den aktuellen Regeln keine Bossnamen mehr sind (alte Fehltreffer)
-    gueltig = set(lade_namen(os.path.join(HIER, "namen.json")))
-    veraltet = [(i, b) for i, b in db.execute("SELECT id, boss FROM kaempfe") if norm(b) not in gueltig]
-    for i, b in veraltet:
-        db.execute("DELETE FROM kaempfe WHERE id=?", (i,))
-    if veraltet:
-        print(f"{len(veraltet)} Kämpfe mit nicht mehr gültigem Namen entfernt: " + ", ".join(sorted({b for _, b in veraltet})))
-    kurz = db.execute("UPDATE kaempfe SET ende_s=start_s+2.5 WHERE ende_s < start_s+2.5").rowcount
-    if kurz:
-        print(f"{kurz} Kämpfe mit Ende vor oder gleich dem Start auf 2,5 s Länge gesetzt.")
-    # feste Alias-Zuordnung auch auf schon gespeicherte Kämpfe anwenden ("Gargoyle" -> "Bell Gargoyle")
-    namen = lade_namen(os.path.join(HIER, "namen.json"))
-    for von, nach in ALIAS.items():
-        if nach in namen and von in namen:
-            for i, b in db.execute("SELECT id, boss FROM kaempfe").fetchall():
-                if norm(b) == von:
-                    kand = [dict(c, anzeige=namen[nach]["anzeige"]) for c in namen[nach]["kandidaten"]]
-                    db.execute("UPDATE kaempfe SET boss=?, platz=?, kandidaten=? WHERE id=?",
-                               (namen[nach]["anzeige"], nach, json.dumps(kand, ensure_ascii=False), i))
-                    print(f"umbenannt: {b} -> {namen[nach]['anzeige']} (Kampf {i})")
-    db.commit()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        alt = db.execute("SELECT id, quelle FROM videos WHERE quelle NOT LIKE 'http%'").fetchall()
+        for vid, q in alt:
+            n = db.execute("DELETE FROM kaempfe WHERE video_id=?", (vid,)).rowcount
+            db.execute("DELETE FROM videos WHERE id=?", (vid,))
+            print(f"entfernt: {q} ({n} Kämpfe)")
+        # Kämpfe mit Namen, die nach den aktuellen Regeln keine Bossnamen mehr sind (alte Fehltreffer)
+        gueltig = set(lade_namen(os.path.join(HIER, "namen.json")))
+        veraltet = [(i, b) for i, b in db.execute("SELECT id, boss FROM kaempfe") if norm(b) not in gueltig]
+        for i, b in veraltet:
+            db.execute("DELETE FROM kaempfe WHERE id=?", (i,))
+        if veraltet:
+            print(f"{len(veraltet)} Kämpfe mit nicht mehr gültigem Namen entfernt: " + ", ".join(sorted({b for _, b in veraltet})))
+        kurz = db.execute("UPDATE kaempfe SET ende_s=start_s+2.5 WHERE ende_s < start_s+2.5").rowcount
+        if kurz:
+            print(f"{kurz} Kämpfe mit Ende vor oder gleich dem Start auf 2,5 s Länge gesetzt.")
+        # feste Alias-Zuordnung auch auf schon gespeicherte Kämpfe anwenden ("Gargoyle" -> "Bell Gargoyle")
+        namen = lade_namen(os.path.join(HIER, "namen.json"))
+        for von, nach in ALIAS.items():
+            if nach in namen and von in namen:
+                for i, b in db.execute("SELECT id, boss FROM kaempfe").fetchall():
+                    if norm(b) == von:
+                        kand = [dict(c, anzeige=namen[nach]["anzeige"]) for c in namen[nach]["kandidaten"]]
+                        db.execute("UPDATE kaempfe SET boss=?, platz=?, kandidaten=? WHERE id=?",
+                                   (namen[nach]["anzeige"], nach, json.dumps(kand, ensure_ascii=False), i))
+                        print(f"umbenannt: {b} -> {namen[nach]['anzeige']} (Kampf {i})")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     print(f"{len(alt)} Quellen entfernt.")
 
 
@@ -1001,6 +1105,8 @@ def main():
         a.f(a)
     except KeyboardInterrupt:
         sys.exit(130)
+    except RuntimeError as e:
+        p.exit(1, f"{p.prog}: Fehler: {e}\n")
 
 
 if __name__ == "__main__":

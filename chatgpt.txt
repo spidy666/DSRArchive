@@ -1,0 +1,103 @@
+DSRArchive – Fortsetzungsnotiz
+Stand: 2026-10-25
+
+Zweck
+-----
+Diese Datei hält den Stand der Projektanalyse und der Änderungen fest, damit die Arbeit in einer späteren Sitzung oder auf einem anderen Gerät fortgesetzt werden kann. Zuletzt sollte sie nach jeder weiteren Änderung aktualisiert werden.
+Nutzerpräferenz: Am Ende jeder Antwort einen konkreten nächsten Schritt nennen.
+
+Projekt
+-------
+Lokaler Projektordner: C:\Users\matth\Documents\1_DSRArchive\DSRArchive
+GitHub: https://github.com/spidy666/DSRArchive
+Lokales und öffentliches origin/main wurden zuletzt auf denselben Commit geprüft:
+  b182988c95d8a95b1a20d0f7e02f51bb9352fc1b
+Branch: codex/project-hardening
+
+Ursprüngliche Bestandsaufnahme
+------------------------------
+- Lokales Projekt ist ein Python-CLI-Werkzeug für die Erkennung von Bosskämpfen in Dark-Souls-Remastered-Randomizer-Videos.
+- Zentrales Skript: dsrarchive.py. Es nutzt Pillow, SQLite und externe Programme FFmpeg/ffprobe, Tesseract sowie yt-dlp.
+- docs/index.html und docs/kaempfe.json bilden eine statische Suchseite.
+- daten/archiv.db enthielt bei der nur lesenden Prüfung 94 Videos und 853 Kämpfe.
+- requirements.txt führt nur pillow ohne Versionsbindung auf.
+- Vor den Änderungen wurden keine Testdateien oder Testkonfigurationen gefunden. Die README beschreibt manuelle Tests an begrenztem Video-/Screenshotmaterial.
+- Wichtige Logik: lade_namen/vergleiche, hat_leiste/finde_namen, bilder, gruppiere, suche_luecke/verfeinere_start, versuche_trennen/ende_bestimmen, scan, SQLite-Export und Frontend.
+- Sicherheitsdurchsicht: SQL-Werte sind größtenteils parametrisiert; subprocess-Aufrufe verwenden Argumentlisten; Frontend nutzt textContent und beschränkt klickbare Links auf HTTPS Twitch. Keine konkrete ausnutzbare Schwachstelle in der groben Durchsicht festgestellt. Externe Medienparser und Abhängigkeitsversionen bleiben zu prüfen.
+- Hauptempfehlungen aus dem Bericht: (1) Tests für Kernlogik, (2) robuste Fehler-/Prozess-/Transaktionsbehandlung, (3) Monolith modularisieren, (4) Erkennung an größerem gelabeltem Korpus messen, (5) Performance messen und gezielt optimieren.
+
+Git- und Arbeitsbaumhinweise
+----------------------------
+- Branch codex/project-hardening wurde neu angelegt. Wegen schreibgeschütztem .git war dafür eine genehmigte Eskalation nötig.
+- Vor den eigenen Änderungen bestanden bereits lokale Änderungen: kanaele.txt (modified) und ergebnis.txt (untracked). Diese gehören dem Nutzer und wurden nicht verändert.
+- `git diff --check` meldete Leerzeichen am Zeilenende in drei bereits veränderten kanaele.txt-Zeilen (Zeilen 8, 16, 18); kanaele.txt wurde nicht angefasst.
+- Das Repository hatte beim letzten Remote-Check nur `main`, keine Tags. Remote main zeigte auf denselben Commit wie lokales HEAD.
+
+Eigene Änderungen auf codex/project-hardening
+---------------------------------------------
+1. dsrarchive.py: Die globale temporäre Verzeichnisanlage beim Modulimport wurde lazy gemacht. `TMP` startet nun mit None; `temp_verzeichnis()` ruft tempfile.mkdtemp erst bei Nutzung auf. Die beiden Stellen für OCR-Bild und FFmpeg-Log verwenden diese Funktion. Zweck: Ein Import des Moduls für Offline-Tests erzeugt keinen temporären Ordner.
+2. tests/test_dsrarchive.py neu: unittest-Fälle für Unicode-/Zeichennormalisierung, exakten und partiellen Bossnamenvergleich, zu kurze Namen, Treffergruppierung, Twitch-Playlist-JSON, Kapitelbereiche und negative Twitch-Zeitlinks.
+3. Die Tests wurden NICHT ausgeführt. Es wurde keine Laufzeit-/Video-/Twitch-Prüfung vorgenommen.
+
+Fortsetzung am 2026-10-25
+------------------------
+- In tests/test_dsrarchive.py wurden zwei Regressionstests für die Lava-Sonderbehandlung von `versuche_trennen()` ergänzt: (a) ein zusammenhängender Kampf behält das zuvor bestimmte Ende; (b) bekannte Treffer mit mindestens 45 Sekunden Abstand ergeben zwei getrennte Versuche.
+- Auf Nutzerfreigabe wurde `python -m unittest discover -s tests` ausgeführt. Der erste Lauf deckte eine falsche Erwartung im Test zur Gruppierung auf (große Lücke plus Bosswechsel ergeben drei Gruppen); Test korrigiert. Der zweite Lauf war erfolgreich: 11 Tests, OK.
+- Es wurde keine Änderung an kanaele.txt oder ergebnis.txt vorgenommen.
+
+Fortsetzung: externe Werkzeuge und DB-Transaktionen
+---------------------------------------------------
+- FFmpeg/ffprobe/Tesseract-Aufrufe verwenden nun einen gemeinsamen Wrapper mit Zeitlimit, Abbruch bei Fehlerstatus und verständlichem Fehlertext. ffprobe-Ausgabe ohne gültige Videometadaten wird als RuntimeError gemeldet.
+- Einzelbild-FFmpeg hat ein 60-s-Limit, ffprobe 120 s, Tesseract 60 s. Der FFmpeg-Streamprozess wird beim regulären Ende abgewartet; bei vorzeitigem Generatorabbruch beendet und wartet die Funktion den Prozess, mit kill als Fallback nach 5 s. Ein non-zero Exit wird mit Ende des Logauszugs gemeldet.
+- `scan --neu` löscht den bisherigen Eintrag nicht mehr vor der Videoanalyse. Video und zugehörige Kämpfe werden beim Speichern in einer `BEGIN IMMEDIATE`-Transaktion ersetzt. Fehler lösen Rollback aus; Verbindung wird geschlossen. Die Transaktion hält keinen Schreiblock über die Videoanalyse.
+- `bereinigen` führt seine Lösch-/Update-Änderungen ebenfalls innerhalb einer Transaktion mit Rollback im Fehlerfall aus. `db_oeffnen` aktiviert SQLite-Fremdschlüsselprüfung.
+- Tests für External-Tool-Fehler/Timeout und DB-Rollback ergänzt. Gesamtlauf `python -m unittest discover -s tests`: 14 Tests, OK. Verwendet wurde eine temporäre Test-DB; die Projekt-Datenbank wurde nicht beschrieben.
+- Weiterhin keine echten FFmpeg-/Tesseract-/Twitch-Scans durchgeführt. Die Timeoutwerte sind bisher nicht an langen HLS-Videos validiert worden.
+
+Fortsetzung: schreibfreie DB-Lesezugriffe
+---------------------------------------
+- Neue Funktion `db_lesen()` öffnet bestehende SQLite-Dateien mit URI `mode=ro`; fehlende DB-Dateien werden nicht versehentlich angelegt. `suche`, `export`, `abdeckung` und `clips` nutzen diese Verbindung und schließen sie nach dem Lesen.
+- Export/Suche behandeln ältere Datenbanken ohne `videos.datum` kompatibel (Datum wird als NULL exportiert), ohne die DB beim Lesen zu migrieren.
+- Tests decken schreibfreies Öffnen, Kompatibilität mit altem Schema und nicht angelegte fehlende DB ab.
+- Nach diesen Ergänzungen: `python -m unittest discover -s tests` erfolgreich, 16 Tests, OK. Kein Video wurde verarbeitet; Projekt-DB blieb unangetastet.
+
+Fortsetzung: CLI-Fehlermeldung für ffprobe
+------------------------------------------
+- Nutzer führte den Beispielpfad `C:\Pfad\zum\kurzen-clip.mp4` wörtlich aus. ffprobe meldete korrekt `No such file or directory`; Ursache war ein Platzhalter und kein Fehler im ffprobe-Aufruf.
+- `main()` fängt RuntimeError nun ab und beendet die CLI mit einer einzeiligen Fehlermeldung statt Python-Traceback.
+- Test ergänzt, der sicherstellt, dass RuntimeError in der CLI ohne Traceback ausgegeben wird. Testsuite erneut gelaufen: 17 Tests, OK.
+- Keine echte Videoquelle verarbeitet.
+
+Fortsetzung: Twitch-Clip beschafft und lokal gescannt
+----------------------------------------------------
+- Mit dem README-Befehl `clips` wurde ein einzelner 480p-Ausschnitt (5 MB) aus dem archivierten VOD 2909604587 für `donnie_oh`, Boss `Stray Demon`, geladen.
+- Datei liegt im tatsächlichen Windows-TEMP: `C:\Users\matth\AppData\Local\Temp\dsrarchive-test-clips\donnie_oh\Stray Demon\donnie_oh - Stray Demon - 2909604587 - 1-50-50.mp4`.
+- Mit separater Test-DB `C:\Users\matth\AppData\Local\Temp\dsrarchive-scan-test.db` gescannt, Versatz 6650. Intervall 30 s: 1 Stichprobe, 0 Kämpfe. Danach 5 s: 6 Stichproben, 0 Kämpfe. Danach 2 s: 14 Stichproben, 0 Kämpfe. Scanprozess erfolgreich; Erkennung dieses Clips also nicht bestätigt.
+- Projektarchiv `daten/archiv.db` nicht verändert. Temporäre Test-DB und Clip liegen außerhalb des Repos. Es wurde kein echter Treffer nachgewiesen; wahrscheinlich ist dieser sehr kurze Ausschnitt oder die zugrundeliegende 2,5-s-Einzelaufnahme für eine Positivprüfung ungeeignet.
+- Danach wurde ein gezielter längerer Ausschnitt aus VOD 2909515614 mit yt-dlp (480p, Sekunden 5241–5724) geladen: `C:\Users\matth\AppData\Local\Temp\dsrarchive-test-clips\KaddiTV\Gaping Dragon\KaddiTV - Gaping Dragon - 2909515614 - long-test.mp4` (ca. 8:03, 81 MB).
+- Dieser Ausschnitt wurde mit 30-s-Intervall und separater DB `C:\Users\matth\AppData\Local\Temp\dsrarchive-scan-long.db` erfolgreich erkannt: 17 Stichproben, 14 Namens-Treffer, eine Gruppe/ein Versuch, Gaping Dragon, lokale Startzeit 1:27:22. Mit Versatz 5241 entspricht das ungefähr 1:27:22 im Original-VOD; automatische Vorlauf-Linkzeit 1:27:12. Datenbank archiv_lokal blieb unverändert.
+- Nutzer hat den erkannten Startzeitpunkt des langen Gaping-Dragon-Clips visuell geprüft und bestätigt, dass er gut aussieht.
+- Nutzer probierte anschließend ebenfalls den Beispielplatzhalter `C:\Videos\mein-clip.mp4`; auch dieser existiert nicht auf seinem Rechner. Er benötigt einen konkreten vorhandenen Videopfad.
+
+Nächste sinnvolle Schritte
+--------------------------
+1. Den langen Gaping-Dragon-Testclip bei Bedarf lokal ansehen oder als reproduzierbares manuelles Prüfmuster behalten; nicht ins Repo committen (Twitch-Video).
+2. Über Änderungen auf `codex/project-hardening` entscheiden (Review, Commit oder weitere Anpassungen); noch wurde nichts committed oder gepusht.
+3. Änderungen klein halten und die vorhandenen kanaele.txt-/ergebnis.txt-Nutzeränderungen erhalten.
+
+Wichtige Grenzen
+----------------
+- Keine Dateien löschen, überschreiben oder Nutzeränderungen zurücksetzen.
+- Bisher keine Tests oder destruktiven Befehle ausgeführt.
+- Bitte diese Notiz im Projektstamm (`chatgpt.txt`) bei weiterer Arbeit fortschreiben.
+
+Abschluss-Review (2026-10-25; ohne zweiten Clip)
+------------------------------------------------
+- Ausgeführt: `python -m unittest discover -s tests` — 17 Tests, alle erfolgreich (0.056 s).
+- Geprüfter Diff: `dsrarchive.py`; Änderungen umfassen externe Werkzeugfehler/Timeouts, FFmpeg-Prozessbereinigung, DB-Transaktionen sowie strikt lesende DB-Zugriffe.
+- `git status --short`: eigene Projektänderungen in `dsrarchive.py`, neu `tests/` und `chatgpt.txt`; bereits vorhandene Nutzereinträge `kanaele.txt` (modified) und `ergebnis.txt` (untracked) weiterhin vorhanden und unangetastet.
+- `git diff --check` meldet ausschließlich die bereits dokumentierten Leerzeichen am Zeilenende in `kanaele.txt` (Zeilen 8, 16, 18); die Datei wurde nicht bearbeitet.
+- Keine zweite Videodatei geladen oder geprüft. Die zuvor bestätigte manuelle Prüfung des Gaping-Dragon-Startzeitpunkts bleibt die einzige erfolgreiche Videovalidierung.
+- Kein Commit oder Push vorgenommen.
+- Offene Grenzen: Unit-Tests mocken externe Programme; reale Fehlerpfade von FFmpeg/Tesseract wurden nicht separat provoziert. Es gibt noch keinen CI-Lauf und keine breite Präzisions-/Recall-Messung auf gelabeltem Videomaterial.
+- Stand ist reviewbar auf `codex/project-hardening`; nächster sinnvoller Schritt: Nutzer prüft den Diff und entscheidet, ob die Änderungen committed werden sollen.
