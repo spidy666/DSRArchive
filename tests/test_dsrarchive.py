@@ -109,6 +109,25 @@ class LavaVersuchstrennung(unittest.TestCase):
         self.assertEqual([k["versuche"] for k in kaempfe], [2, 2])
 
 
+class StreamStartzeit(unittest.TestCase):
+    def test_bilderzeiten_ohne_startzeit_des_streams(self):
+        """Twitch-VODs beginnen nicht bei 0: die Zeiten müssen trotzdem ab Videoanfang zählen."""
+        import shutil, subprocess
+        if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+            self.skipTest("ffmpeg nicht vorhanden")
+        with tempfile.TemporaryDirectory() as tmp:
+            pfad = str(Path(tmp) / "offset.ts")
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10:duration=60",
+                            "-c:v", "libx264", "-g", "20", "-f", "mpegts", "-output_ts_offset", "62", pfad], check=True)
+            dsrarchive._START.clear()
+            self.assertGreater(dsrarchive.start_zeit(pfad), 62)
+            zeiten = []
+            for _ in dsrarchive.bilder(pfad, 640, 360, 30, zeiten, True, [(10, 50)]):
+                pass
+            self.assertTrue(zeiten)
+            self.assertTrue(all(10 <= t <= 51 for t in zeiten), zeiten)
+
+
 class TwitchHilfsfunktionen(unittest.TestCase):
     def test_liste_parsen_baut_video_url_aus_id(self):
         daten = dsrarchive.liste_parsen(

@@ -302,6 +302,23 @@ def video_info(quelle):
     return w, h, dauer
 
 
+_START = {}
+
+
+def start_zeit(quelle):
+    """Startzeit des Streams in Sekunden (ffprobe format=start_time). Twitch-VODs beginnen oft nicht bei 0
+    (z. B. 62 s); mit -copyts stehen dann alle Bildzeiten um diesen Wert zu spät."""
+    if quelle not in _START:
+        r = _run_checked(["ffprobe", "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", quelle],
+                         "ffprobe", timeout=120, capture_output=True, text=True)
+        try:
+            v = float(r.stdout.strip().splitlines()[0])
+            _START[quelle] = v if math.isfinite(v) and v >= 0 else 0.0
+        except (ValueError, IndexError):
+            _START[quelle] = 0.0
+    return _START[quelle]
+
+
 def breite_fuer(w):
     """Quellen mit kleiner Auflösung (z. B. 480p) werden auf das Doppelte hochskaliert."""
     return min(BREITE_MAX, w * 2) // 2 * 2
@@ -352,6 +369,7 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
     vf, b, sh = _vf(w, h)
     logpfad = os.path.join(temp_verzeichnis(), "ffmpeg.log")
     zeiten.clear()
+    start = start_zeit(quelle) if bereiche else 0.0   # nur mit -copyts stehen die Rohzeiten des Streams im Log
     for ab, bis in (bereiche or [(None, None)]):
         vorn = ["-ss", str(ab), "-t", str(bis - ab), "-copyts"] if ab is not None else []
         cmd = ["ffmpeg", "-hide_banner", "-nostats", "-v", "info", *(["-skip_frame", "nokey"] if nur_schluessel else []),
@@ -392,7 +410,7 @@ def bilder(quelle, w, h, intervall, zeiten, nur_schluessel=True, bereiche=None):
         for l in open(logpfad, encoding="utf-8", errors="replace"):
             m = re.search(r"Parsed_showinfo.*?pts_time:\s*([0-9.]+)", l)
             if m:
-                zeiten.append(float(m.group(1)))
+                zeiten.append(float(m.group(1)) - start)
 
 
 def bild_bei(quelle, w, h, t):
@@ -504,6 +522,8 @@ def db_oeffnen(pfad):
     """)
     if "datum" not in [r[1] for r in db.execute("PRAGMA table_info(videos)")]:   # ältere Datenbanken ergänzen
         db.execute("ALTER TABLE videos ADD COLUMN datum TEXT")
+    if "zeit_korrigiert" not in [r[1] for r in db.execute("PRAGMA table_info(videos)")]:
+        db.execute("ALTER TABLE videos ADD COLUMN zeit_korrigiert INTEGER")   # NULL = Zeiten noch um die Stream-Startzeit zu spät
     return db
 
 
@@ -523,8 +543,8 @@ def scan_speichern(pfad, quelle, alt, streamer, titel, tid, dauer, datum, modus,
         if alt:
             db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
             db.execute("DELETE FROM videos WHERE id=?", alt)
-        cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum) "
-                         "VALUES(?,?,?,?,?,?,?,?)",
+        cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum,zeit_korrigiert) "
+                         "VALUES(?,?,?,?,?,?,?,?,1)",
                          (quelle, streamer, tid, titel, modus, dauer,
                           datetime.now().isoformat(timespec="seconds"), datum))
         vid = cur.lastrowid
@@ -993,6 +1013,37 @@ def clips(a):
     print(f"{fertig} Clips gespeichert.")
 
 
+def zeiten_korrigieren(a):
+    """Einmalig: zieht bei bereits gescannten Videos die Startzeit des Streams (ffprobe start_time) von allen
+    Kampfzeiten ab. Der frühere Scan las die Rohzeiten des Streams, die bei Twitch-VODs um diesen Wert zu
+    spät lagen. Jedes Video wird nur einmal korrigiert (Markierung zeit_korrigiert)."""
+    db = db_oeffnen(a.db)
+    try:
+        zeilen = db.execute("SELECT id, quelle, twitch_id FROM videos WHERE zeit_korrigiert IS NULL "
+                            "AND quelle LIKE 'http%' ORDER BY id").fetchall()
+        print(f"{len(zeilen)} Videos zu korrigieren.")
+        ok = 0
+        for vid, quelle, tid in zeilen:
+            try:
+                args = argparse.Namespace(streamer=None, titel=None, twitch_id=None, hoehe=480)
+                src = quelle_aufloesen(quelle, args)[0]
+                versatz = start_zeit(src)
+            except (SystemExit, RuntimeError) as e:
+                print(f"  {tid}: übersprungen ({e})", file=sys.stderr)
+                continue
+            if not a.nur_zeigen:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("UPDATE kaempfe SET start_s=MAX(0, start_s-?), ende_s=MAX(0, ende_s-?) WHERE video_id=?",
+                           (versatz, versatz, vid))
+                db.execute("UPDATE videos SET zeit_korrigiert=1 WHERE id=?", (vid,))
+                db.commit()
+            ok += 1
+            print(f"  {tid}: {versatz:.1f} s abgezogen" + (" (nur angezeigt)" if a.nur_zeigen else ""))
+        print(f"{ok} von {len(zeilen)} Videos {'geprüft' if a.nur_zeigen else 'korrigiert'}.")
+    finally:
+        db.close()
+
+
 def abdeckung(a):
     """Zeigt für jeden Boss-Platz (5 Punkte), ob schon ein Kampf in der Datenbank dazu passt.
     Ein Kampf zählt für jeden Platz, den seine Deutungen nennen (bei mehrdeutigen Namen für mehrere)."""
@@ -1099,6 +1150,9 @@ def main():
     ab = sub.add_parser("abdeckung", help="zeigen, welche Boss-Plätze schon in der Datenbank vorkommen")
     ab.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
     ab.set_defaults(f=abdeckung)
+    zk = sub.add_parser("zeiten-korrigieren", help="Kampfzeiten alter Scans um die Stream-Startzeit korrigieren (einmalig)")
+    zk.add_argument("--nur-zeigen", action="store_true", help="nur die Startzeiten ausgeben, nichts ändern")
+    zk.set_defaults(f=zeiten_korrigieren)
     b = sub.add_parser("bereinigen", help="Einträge von lokalen Test-Dateien entfernen")
     b.set_defaults(f=bereinigen)
     q = sub.add_parser("suche")
