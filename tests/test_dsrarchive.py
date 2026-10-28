@@ -128,6 +128,31 @@ class StreamStartzeit(unittest.TestCase):
             self.assertTrue(all(10 <= t <= 51 for t in zeiten), zeiten)
 
 
+class ClipZeitbestimmung(unittest.TestCase):
+    def test_name_passt_ueber_boss_platz_nicht_ueber_namensschluessel(self):
+        hit = {"key": "taurus damon", "kandidaten": [{"platz": "1-1"}]}
+        self.assertTrue(dsrarchive._passt(hit, frozenset({"1-1"})))
+        self.assertFalse(dsrarchive._passt(hit, frozenset({"2-0"})))
+        self.assertFalse(dsrarchive._passt(None, frozenset({"1-1"})))
+
+    def test_ende_und_start_ueber_luecken_und_nie_vor_dem_scanwert(self):
+        treffer = {0: False, 4: True, 8: False, 12: True, 16: False, 20: False, 24: False, 28: False, 32: False,
+                   36: False, 40: False, 44: False, 48: False, 52: False, 56: False, 60: False}
+        hit = {"kandidaten": [{"platz": "1-1"}]}
+        def bild(src, w, h, t):
+            return t
+        def finde(img, namen, sprache, schwelle):
+            return hit if treffer.get(img, False) else None
+        with patch.object(dsrarchive, "bild_bei", bild), patch.object(dsrarchive, "finde_namen", finde):
+            self.assertEqual(dsrarchive.ende_bestimmen("x", 1, 1, {}, "eng", 0.85, frozenset({"1-1"}), 0), 12)
+            self.assertEqual(dsrarchive.ende_bestimmen("x", 1, 1, {}, "eng", 0.85, frozenset({"1-1"}), 50), 50)
+        treffer2 = {40: True, 36: False, 32: True, 28: False, 24: False}
+        def finde2(img, namen, sprache, schwelle):
+            return hit if treffer2.get(img, False) else None
+        with patch.object(dsrarchive, "bild_bei", bild), patch.object(dsrarchive, "finde_namen", finde2):
+            self.assertEqual(dsrarchive.start_bestimmen("x", 1, 1, {}, "eng", 0.85, frozenset({"1-1"}), 44), 32)
+
+
 class TwitchHilfsfunktionen(unittest.TestCase):
     def test_liste_parsen_baut_video_url_aus_id(self):
         daten = dsrarchive.liste_parsen(

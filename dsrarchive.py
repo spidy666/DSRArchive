@@ -932,19 +932,48 @@ def versuche_trennen(k, src, w, h, namen, sprache, schwelle, treffer, nur_schlue
     return out
 
 
-def ende_bestimmen(src, w, h, namen, sprache, schwelle, key, letzter, spanne=30):
-    """Genaues Ende eines Kampfes: `letzter` ist ein Zeitpunkt mit Namen an der Leiste, nach `spanne`
-    Sekunden war er weg. Durch Halbieren wird der letzte Zeitpunkt mit Namen auf etwa 2 s bestimmt."""
-    lo, hi = letzter, letzter + spanne
-    while hi - lo > 2:
-        mitte = (lo + hi) / 2
-        img = bild_bei(src, w, h, mitte)
+def _passt(hit, plaetze):
+    """Gehört der gefundene Name zu einem der Boss-Plätze des Kampfes (Plätze statt Namensschlüssel, weil
+    deutsche und englische Schreibweise verschiedene Namensschlüssel haben)?"""
+    return bool(hit) and any(c["platz"] in plaetze for c in hit["kandidaten"])
+
+
+def ende_bestimmen(src, w, h, namen, sprache, schwelle, key, letzter, spanne=30, schritt=4, luecke=16):
+    """Genaues Ende eines Kampfes: der Scan liest nur alle 30 s ein Bild, der Name kann also noch länger
+    stehen als `letzter`. Läuft von `letzter` vorwärts (alle `schritt` s, höchstens `spanne` s) und gibt den
+    letzten Zeitpunkt zurück, an dem der Name noch steht. Lücken bis `luecke` s (16 s: Namen werden nicht in jedem
+    Bild gelesen) gelten als Fortsetzung. Das Ende wird nie früher als `letzter`."""
+    spaet, fehlt, t = letzter, 0.0, letzter
+    while t - letzter < spanne:
+        t += schritt
+        img = bild_bei(src, w, h, t)
         hit = finde_namen(img, namen, sprache, schwelle) if img else None
-        if hit and (hit["key"] in key if isinstance(key, (set, frozenset)) else hit["key"] == key):
-            lo = mitte
+        if _passt(hit, key):
+            spaet, fehlt = t, 0.0
         else:
-            hi = mitte
-    return lo
+            fehlt += schritt
+            if fehlt > luecke:
+                break
+    return spaet
+
+
+def start_bestimmen(src, w, h, namen, sprache, schwelle, key, start, spanne=30, schritt=4, luecke=16):
+    """Genauer Start eines Kampfes: der Scan liest nur alle 30 s ein Bild, der Kampf kann also schon
+    früher begonnen haben. Läuft von `start` rückwärts (alle `schritt` s, höchstens `spanne` s) und gibt
+    den frühesten Zeitpunkt zurück, an dem der Name noch steht. Lücken bis `luecke` s (Namen werden
+    nicht in jedem Bild gelesen) gelten als Fortsetzung."""
+    frueh, fehlt, t = start, 0.0, start
+    while start - t < spanne and t > 0:
+        t = max(0.0, t - schritt)
+        img = bild_bei(src, w, h, t)
+        hit = finde_namen(img, namen, sprache, schwelle) if img else None
+        if _passt(hit, key):
+            frueh, fehlt = t, 0.0
+        else:
+            fehlt += schritt
+            if fehlt > luecke:
+                break
+    return frueh
 
 
 def dateiname(text):
@@ -956,10 +985,10 @@ def clips(a):
     Video löscht). Das Ende wird dabei genau bestimmt. Schon vorhandene Dateien werden übersprungen."""
     global LEISTENPRUEFUNG
     LEISTENPRUEFUNG = True
-    namen = lade_namen(a.namen)
+    namen = lade_namen(a.namen, True)   # auch deutsche Bossnamen (Taurus-Dämon usw.)
     db = db_lesen(a.db)
     try:
-        zeilen = db.execute("SELECT v.quelle, v.streamer, v.twitch_id, k.boss, k.platz, k.start_s, k.ende_s "
+        zeilen = db.execute("SELECT v.quelle, v.streamer, v.twitch_id, k.boss, k.kandidaten, k.start_s, k.ende_s "
                             "FROM kaempfe k JOIN videos v ON v.id=k.video_id WHERE v.quelle LIKE 'http%' "
                             "ORDER BY v.id, k.start_s").fetchall()
     finally:
@@ -969,7 +998,8 @@ def clips(a):
     if a.boss:
         zeilen = [z for z in zeilen if norm(a.boss) in norm(z[3])]
     geplant = []
-    for quelle, streamer, tid, boss, key, start, ende in zeilen:
+    for quelle, streamer, tid, boss, kand, start, ende in zeilen:
+        key = frozenset(c["platz"] for c in json.loads(kand))   # alle Plätze, die zum Namen passen können
         sek = int(start) - a.vor
         pfad = os.path.join(a.ziel, dateiname(streamer), dateiname(boss),
                             f"{dateiname(streamer)} - {dateiname(boss)} - {tid} - {hms(max(0, sek)).replace(':', '-')}.mp4")
@@ -998,9 +1028,11 @@ def clips(a):
                 quellen[quelle] = (src,) + video_info(src)[:2]
             src, w, h = quellen[quelle]
             ende_neu = ende_bestimmen(src, w, h, namen, "eng", 0.85, key, ende)
-            von, bis = max(0, int(start) - a.vor), int(ende_neu) + a.nach
+            start_neu = start_bestimmen(src, w, h, namen, "eng", 0.85, key, start)
+            von, bis = max(0, int(start_neu) - a.vor), int(ende_neu) + a.nach
             os.makedirs(os.path.dirname(pfad), exist_ok=True)
-            print(f"{streamer} {boss} {hms(von)}–{hms(bis)} (Ende bestimmt: {hms(ende_neu)}, davor {hms(ende)})")
+            print(f"{streamer} {boss} {hms(von)}–{hms(bis)} (Start bestimmt: {hms(start_neu)}, davor {hms(start)}; "
+                  f"Ende bestimmt: {hms(ende_neu)}, davor {hms(ende)})")
             r = subprocess.run(["yt-dlp", "-f", f"best[height<={a.hoehe}]/best", "--download-sections", f"*{von}-{bis}",
                                 "-o", pfad, "--no-progress", quelle], capture_output=True, text=True)
             if r.returncode or not os.path.exists(pfad):
