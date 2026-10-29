@@ -314,5 +314,73 @@ class ExterneWerkzeugeUndTransaktionen(unittest.TestCase):
             self.assertFalse(Path(db_path).exists())
 
 
+class UhrzeitUndClipVerknuepfung(unittest.TestCase):
+    def _db_mit_kampf(self, tmp, stream_start="2026-10-05T17:00:00Z"):
+        db_path = str(Path(tmp) / "archiv.db")
+        kandidat = {"gebiet": "G", "deutung": "platz", "anzeige": "Boss", "rando_en": "Boss"}
+        kampf = {"kandidaten": [kandidat], "name": "Boss", "key": "boss",
+                 "start": 125, "ende": 200, "score": 1.0, "treffer": 2}
+        dsrarchive.scan_speichern(db_path, "https://www.twitch.tv/videos/42", None, "Streamer", "T", "42",
+                                  500, "2026-10-05", "randomizer", [kampf], stream_start=stream_start)
+        return db_path
+
+    def test_zeitstempel_und_kampfbeginn(self):
+        self.assertEqual(dsrarchive.zeitstempel_text("1790000000"), "2026-09-21T14:13:20Z")
+        self.assertIsNone(dsrarchive.zeitstempel_text("NA"))
+        self.assertEqual(dsrarchive.kampf_beginn("2026-10-05T17:00:00Z", 125), "2026-10-05T17:02:05Z")
+        self.assertIsNone(dsrarchive.kampf_beginn(None, 125))
+
+    def test_alte_datenbank_bekommt_neue_spalten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "alt.db")
+            db = sqlite3.connect(db_path)
+            db.executescript("CREATE TABLE videos(id INTEGER PRIMARY KEY, quelle TEXT UNIQUE);"
+                             "CREATE TABLE kaempfe(id INTEGER PRIMARY KEY, video_id INTEGER);")
+            db.commit()
+            db.close()
+            db = dsrarchive.db_oeffnen(db_path)
+            self.assertIn("stream_start", {r[1] for r in db.execute("PRAGMA table_info(videos)")})
+            self.assertIn("clip", {r[1] for r in db.execute("PRAGMA table_info(kaempfe)")})
+            db.close()
+
+    def test_export_hat_uhrzeit_aber_keinen_clip_pfad(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._db_mit_kampf(tmp)
+            db = dsrarchive.db_oeffnen(db_path)
+            db.execute("UPDATE kaempfe SET clip='Streamer/Boss/x.mp4'")
+            db.commit()
+            db.close()
+            db = dsrarchive.db_lesen(db_path)
+            try:
+                export_zeile = dsrarchive.zeilen_aus_db(db)[0]
+                lokal_zeile = dsrarchive.zeilen_aus_db(db, mit_clip=True)[0]
+            finally:
+                db.close()
+            self.assertEqual(export_zeile["kampf_beginn"], "2026-10-05T17:02:05Z")
+            self.assertEqual(export_zeile["stream_start"], "2026-10-05T17:00:00Z")
+            self.assertNotIn("clip", export_zeile)
+            self.assertEqual(lokal_zeile["clip"], "Streamer/Boss/x.mp4")
+
+    def test_clips_verknuepfen_setzt_und_entfernt_den_pfad(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._db_mit_kampf(tmp)
+            ziel = Path(tmp) / "clips"
+            datei = Path(dsrarchive.clip_pfad(str(ziel), "Streamer", "Boss", "42", 125, 10))
+            datei.parent.mkdir(parents=True)
+            datei.write_bytes(b"x")
+            args = type("A", (), {"db": db_path, "ziel": str(ziel), "vor": 10})()
+            with contextlib.redirect_stdout(io.StringIO()):
+                dsrarchive.clips_verknuepfen(args)
+            db = sqlite3.connect(db_path)
+            self.assertEqual(db.execute("SELECT clip FROM kaempfe").fetchone()[0], "Streamer/Boss/Streamer - Boss - 42 - 0-01-55.mp4")
+            db.close()
+            datei.unlink()
+            with contextlib.redirect_stdout(io.StringIO()):
+                dsrarchive.clips_verknuepfen(args)
+            db = sqlite3.connect(db_path)
+            self.assertIsNone(db.execute("SELECT clip FROM kaempfe").fetchone()[0])
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

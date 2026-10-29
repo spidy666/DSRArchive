@@ -9,6 +9,12 @@ Abschnitte nach Datum geordnet, der neueste zuerst.
 ## [Unveröffentlicht]
 
 ### Hinzugefügt
+- Uhrzeit: neue Spalte `videos.stream_start` (Beginn des Videos, UTC). Neue Scans speichern sie, der Befehl
+  `uhrzeiten-nachtragen` ergänzt bestehende Videos. `export` liefert `stream_start` und `kampf_beginn`,
+  die Suchseite zeigt Datum und Uhrzeit in der Ortszeit des Besuchers, `suche` in der Zeitzone des Rechners.
+- Clip-Verknüpfung: neue Spalte `kaempfe.clip` und Befehl `clips-verknuepfen`. Der Pfad bleibt lokal
+  (`suche` zeigt ihn), er steht nicht im Export und nicht auf der öffentlichen Seite.
+- Tests für Zeitstempel, Spaltenmigration, Export ohne Clip-Pfad und Clip-Verknüpfung.
 - `tools/transkribieren.py`: transkribiert ein Video lokal mit faster-whisper auf der CPU und schreibt
   `.srt` und `.txt` (`--sprache`, `--modell`, `--ohne-vad`). `--fortsetzen` setzt ein abgebrochenes
   Transkript am Stand der `.srt` fort. Das Audio wird über ffmpeg dekodiert.

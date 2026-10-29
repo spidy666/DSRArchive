@@ -146,7 +146,7 @@
       <table>
         <thead><tr>
           <th scope="col" aria-sort="none"><button type="button" data-sort="streamer">Streamer</button></th>
-          <th scope="col" aria-sort="descending"><button type="button" data-sort="datum">Datum</button></th>
+          <th scope="col" aria-sort="descending"><button type="button" data-sort="datum">Datum · Uhrzeit</button></th>
           <th scope="col" aria-sort="none"><button type="button" data-sort="boss">Name an der Leiste</button></th>
           <th scope="col">Mögliche Zuordnung</th>
           <th scope="col">Video</th>
@@ -238,6 +238,14 @@
     anzeigen();
   }
 
+  function datumText(entry) {
+    // Beginn des Kampfes in der Ortszeit des Besuchers; ohne Uhrzeit in der Datei nur das Datum
+    var t = entry.kampf_beginn ? new Date(entry.kampf_beginn) : null;
+    if (!t || isNaN(t.getTime())) return entry.datum || "—";
+    function z(n) { return (n < 10 ? "0" : "") + n; }
+    return t.getFullYear() + "-" + z(t.getMonth() + 1) + "-" + z(t.getDate()) + " " + z(t.getHours()) + ":" + z(t.getMinutes());
+  }
+
   function videoZelle(row, entry) {
     var cell = document.createElement("td");
     cell.className = "video";
@@ -283,7 +291,7 @@
     treffer.slice(start, start + PAGE_SIZE).forEach(function (entry) {
       var row = document.createElement("tr");
       zelle(row, entry.streamer, "streamer");
-      zelle(row, entry.datum || "—", "date");
+      zelle(row, datumText(entry), "date");
       zelle(row, entry.boss || "Unbekannt", "boss");
       var interpretations = zelle(row, "", "interpretations");
       (Array.isArray(entry.deutungen) ? entry.deutungen : []).forEach(function (text) {

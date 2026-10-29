@@ -13,7 +13,7 @@ Voraussetzungen: Python 3, Pillow (pip install pillow), ffmpeg + ffprobe und tes
 im PATH (für deutschen Spieltext die Sprachdatei deu), für Adressen zusätzlich yt-dlp.
 """
 import argparse, difflib, io, json, math, os, re, shutil, sqlite3, subprocess, sys, tempfile, time, unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PIL import Image, ImageFilter
@@ -524,6 +524,10 @@ def db_oeffnen(pfad):
         db.execute("ALTER TABLE videos ADD COLUMN datum TEXT")
     if "zeit_korrigiert" not in [r[1] for r in db.execute("PRAGMA table_info(videos)")]:
         db.execute("ALTER TABLE videos ADD COLUMN zeit_korrigiert INTEGER")   # NULL = Zeiten noch um die Stream-Startzeit zu spät
+    if "stream_start" not in [r[1] for r in db.execute("PRAGMA table_info(videos)")]:
+        db.execute("ALTER TABLE videos ADD COLUMN stream_start TEXT")   # Beginn des Videos, UTC (JJJJ-MM-TTThh:mm:ssZ)
+    if "clip" not in [r[1] for r in db.execute("PRAGMA table_info(kaempfe)")]:
+        db.execute("ALTER TABLE kaempfe ADD COLUMN clip TEXT")   # Pfad des lokalen Clips relativ zum Clip-Ordner
     return db
 
 
@@ -535,7 +539,7 @@ def db_lesen(pfad):
     return db
 
 
-def scan_speichern(pfad, quelle, alt, streamer, titel, tid, dauer, datum, modus, kaempfe):
+def scan_speichern(pfad, quelle, alt, streamer, titel, tid, dauer, datum, modus, kaempfe, stream_start=None):
     """Ersetzt Video und Treffer in einer einzigen Transaktion."""
     db = db_oeffnen(pfad)
     try:
@@ -543,10 +547,10 @@ def scan_speichern(pfad, quelle, alt, streamer, titel, tid, dauer, datum, modus,
         if alt:
             db.execute("DELETE FROM kaempfe WHERE video_id=?", alt)
             db.execute("DELETE FROM videos WHERE id=?", alt)
-        cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum,zeit_korrigiert) "
-                         "VALUES(?,?,?,?,?,?,?,?,1)",
+        cur = db.execute("INSERT INTO videos(quelle,streamer,twitch_id,titel,modus,dauer,gescannt_am,datum,"
+                         "zeit_korrigiert,stream_start) VALUES(?,?,?,?,?,?,?,?,1,?)",
                          (quelle, streamer, tid, titel, modus, dauer,
-                          datetime.now().isoformat(timespec="seconds"), datum))
+                          datetime.now().isoformat(timespec="seconds"), datum, stream_start))
         vid = cur.lastrowid
         for k in kaempfe:
             kand = [dict(c, anzeige=k["name"]) for c in k["kandidaten"]]
@@ -600,6 +604,38 @@ def quelle_aufloesen(quelle, a):
         m = re.search(r"\[?v(\d{6,})\]?", os.path.basename(quelle))
         tid = tid or (m and m.group(1))
     return src, streamer or "unbekannt", titel or os.path.basename(quelle), tid, kapitel, datum
+
+
+def stream_zeitstempel(quelle):
+    """Beginn des Twitch-Videos als UTC-Text (JJJJ-MM-TTThh:mm:ssZ) oder None. Nur für Adressen."""
+    if not re.match(r"https?://", quelle):
+        return None
+    r = subprocess.run(["yt-dlp", "--skip-download", "--print", "%(timestamp)s", quelle], capture_output=True, text=True)
+    return zeitstempel_text(r.stdout.strip()) if r.returncode == 0 else None
+
+
+def zeitstempel_text(epoch):
+    """Unix-Sekunden (Text oder Zahl) -> UTC-Text, sonst None."""
+    try:
+        return datetime.fromtimestamp(int(float(epoch)), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def kampf_beginn(stream_start, start_s):
+    """Uhrzeit des Kampfbeginns (UTC-Text) aus Videobeginn und Sekunden im Video, sonst None."""
+    if not stream_start:
+        return None
+    t = datetime.strptime(stream_start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (t + timedelta(seconds=int(start_s))).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def lokal_text(utc_text):
+    """UTC-Text -> 'TT.MM.JJJJ hh:mm:ss' in der Zeitzone des Rechners (leer, wenn unbekannt)."""
+    if not utc_text:
+        return ""
+    t = datetime.strptime(utc_text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone()
+    return t.strftime("%d.%m.%Y %H:%M:%S")
 
 
 def scan(a):
@@ -709,25 +745,35 @@ def scan(a):
     print(f"Auswertung: {len(zeiten) or 'ca. ' + str(int(dauer / a.intervall))} Stichproben, "
           f"{vollsuchen} volle Suchen, {streifen} Streifen-Suchen, {time.time() - t0:.0f} s",
           file=sys.stderr)
-    scan_speichern(a.db, a.quelle, alt, streamer, titel, tid, dauer, datum, a.modus, kaempfe)
+    scan_speichern(a.db, a.quelle, alt, streamer, titel, tid, dauer, datum, a.modus, kaempfe,
+                   stream_start=stream_zeitstempel(a.quelle))
     print(f"{len(kaempfe)} Kämpfe gespeichert.")
 
 
-def zeilen_aus_db(db):
+def zeilen_aus_db(db, mit_clip=False):
+    """Kämpfe als Liste von Wörtern. Der lokale Clip-Pfad kommt nur mit mit_clip=True dazu (nie in den Export)."""
     out = []
     video_spalten = {r[1] for r in db.execute("PRAGMA table_info(videos)")}
+    kampf_spalten = {r[1] for r in db.execute("PRAGMA table_info(kaempfe)")}
     datum_spalte = "v.datum" if "datum" in video_spalten else "NULL"
+    start_spalte = "v.stream_start" if "stream_start" in video_spalten else "NULL"
+    clip_spalte = "k.clip" if "clip" in kampf_spalten else "NULL"
     abfrage = ("SELECT v.streamer, v.titel, v.twitch_id, v.modus, k.boss, k.gebiet, k.rando_de,"
-               " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer, " + datum_spalte +
+               " k.rando_en, k.start_s, k.konfidenz, k.kandidaten, k.ende_s, k.treffer, " + datum_spalte + ", " +
+               start_spalte + ", " + clip_spalte +
                " FROM kaempfe k JOIN videos v ON v.id=k.video_id ORDER BY v.streamer, v.id, k.start_s")
     for r in db.execute(abfrage):
-        s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand, ende, treffer, datum = r
+        s, titel, tid, modus, boss, gebiet, rd, re_, start, konf, kand, ende, treffer, datum, stream_start, clip = r
         kand = json.loads(kand)
-        out.append({"streamer": s, "datum": datum, "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
-                    "gebiet": gebiet, "gegner": re_, "start_s": int(start), "ende_s": int(ende or start),
-                    "treffer": treffer, "konfidenz": konf,
-                    "deutungen": [deutung_text(dict(c, anzeige=boss)) for c in kand],
-                    "link": zeit_link(tid, start - LINK_VORLAUF) if tid else None})
+        eintrag = {"streamer": s, "datum": datum, "stream_start": stream_start, "kampf_beginn": kampf_beginn(stream_start, start),
+                   "titel": titel, "twitch_id": tid, "modus": modus, "boss": boss,
+                   "gebiet": gebiet, "gegner": re_, "start_s": int(start), "ende_s": int(ende or start),
+                   "treffer": treffer, "konfidenz": konf,
+                   "deutungen": [deutung_text(dict(c, anzeige=boss)) for c in kand],
+                   "link": zeit_link(tid, start - LINK_VORLAUF) if tid else None}
+        if mit_clip:
+            eintrag["clip"] = clip
+        out.append(eintrag)
     return out
 
 
@@ -748,12 +794,15 @@ def suche(a):
     zeilen = []
     db = db_lesen(a.db)
     try:
-        ergebnisse = zeilen_aus_db(db)
+        ergebnisse = zeilen_aus_db(db, mit_clip=True)   # lokal: der Clip-Pfad darf angezeigt werden
     finally:
         db.close()
     for z in ergebnisse:
         if t in norm(" ".join([z["streamer"], z["boss"], z["gebiet"], z["gegner"]] + z["deutungen"])):
-            zeilen.append(f"{z['streamer']:<12} {z['datum'] or '??'} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
+            uhr = lokal_text(z["kampf_beginn"])
+            zeilen.append(f"{z['streamer']:<12} {uhr or z['datum'] or '??'} {hms(z['start_s'])}–{hms(z['ende_s'])} {z['boss']:<26} {z['treffer']} Treffer  {z['link'] or ''}")
+            if z.get("clip"):
+                zeilen.append("       Clip: " + z["clip"])
             zeilen += ["       " + d for d in z["deutungen"]]
     if a.out:   # direkt als UTF-8-Datei (die Umleitung > schreibt unter Windows in cp1252 und scheitert an Sonderzeichen)
         with open(a.out, "w", encoding="utf-8") as f:
@@ -980,6 +1029,61 @@ def dateiname(text):
     return re.sub(r'[<>:"/\\|?*]+', "_", text).strip(" .") or "unbekannt"
 
 
+def clip_pfad(ziel, streamer, boss, tid, start, vor):
+    """Dateiname des Clips; er ergibt sich allein aus Datenbankwerten (so findet clips-verknuepfen ihn wieder)."""
+    sek = int(start) - vor
+    return os.path.join(ziel, dateiname(streamer), dateiname(boss),
+                        f"{dateiname(streamer)} - {dateiname(boss)} - {tid} - {hms(max(0, sek)).replace(':', '-')}.mp4")
+
+
+def clips_verknuepfen(a):
+    """Trägt in der Datenbank ein, welcher Kampf schon einen Clip im Ordner hat (kaempfe.clip, relativ zum Ordner).
+    Der Pfad bleibt lokal: Er steht in 'suche', aber nicht im Export für die öffentliche Seite."""
+    db = db_oeffnen(a.db)
+    try:
+        zeilen = db.execute("SELECT k.id, v.streamer, v.twitch_id, k.boss, k.start_s, k.clip "
+                            "FROM kaempfe k JOIN videos v ON v.id=k.video_id WHERE v.quelle LIKE 'http%'").fetchall()
+        neu = fehlt = 0
+        db.execute("BEGIN IMMEDIATE")
+        for kid, streamer, tid, boss, start, alt in zeilen:
+            pfad = clip_pfad(a.ziel, streamer, boss, tid, start, a.vor)
+            rel = os.path.relpath(pfad, a.ziel).replace(os.sep, "/") if os.path.exists(pfad) else None
+            if rel is None:
+                fehlt += 1
+            if rel != alt:
+                db.execute("UPDATE kaempfe SET clip=? WHERE id=?", (rel, kid))
+                neu += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    print(f"{len(zeilen)} Kämpfe, {len(zeilen) - fehlt} mit Clip, {fehlt} ohne; {neu} Einträge geändert.")
+
+
+def uhrzeiten_nachtragen(a):
+    """Trägt bei Videos ohne Uhrzeit den Beginn des Videos nach (videos.stream_start, UTC), über yt-dlp."""
+    db = db_oeffnen(a.db)
+    try:
+        zeilen = db.execute("SELECT id, quelle, twitch_id FROM videos WHERE stream_start IS NULL "
+                            "AND quelle LIKE 'http%' ORDER BY id").fetchall()
+        print(f"{len(zeilen)} Videos ohne Uhrzeit.")
+        ok = 0
+        for vid, quelle, tid in zeilen:
+            t = stream_zeitstempel(quelle)
+            if not t:
+                print(f"  {tid}: kein Zeitstempel (Video gelöscht?)", file=sys.stderr)
+                continue
+            db.execute("UPDATE videos SET stream_start=? WHERE id=?", (t, vid))
+            db.commit()
+            ok += 1
+            print(f"  {tid}: {t}")
+        print(f"{ok} von {len(zeilen)} Videos ergänzt.")
+    finally:
+        db.close()
+
+
 def clips(a):
     """Lädt jeden Kampf aus der Datenbank als Ausschnitt in 720p (private Sicherung, bevor Twitch das
     Video löscht). Das Ende wird dabei genau bestimmt. Schon vorhandene Dateien werden übersprungen."""
@@ -1000,9 +1104,7 @@ def clips(a):
     geplant = []
     for quelle, streamer, tid, boss, kand, start, ende in zeilen:
         key = frozenset(c["platz"] for c in json.loads(kand))   # alle Plätze, die zum Namen passen können
-        sek = int(start) - a.vor
-        pfad = os.path.join(a.ziel, dateiname(streamer), dateiname(boss),
-                            f"{dateiname(streamer)} - {dateiname(boss)} - {tid} - {hms(max(0, sek)).replace(':', '-')}.mp4")
+        pfad = clip_pfad(a.ziel, streamer, boss, tid, start, a.vor)
         if not os.path.exists(pfad):
             geplant.append((quelle, streamer, tid, boss, key, start, ende, pfad))
     geplant.sort(key=lambda g: (int(g[2]) if str(g[2]).isdigit() else 0, g[5]))   # älteste Videos zuerst (Twitch löscht die zuerst)
@@ -1179,6 +1281,12 @@ def main():
     c.add_argument("--nur-planen", action="store_true", help="nur zeigen, was geladen würde")
     c.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
     c.set_defaults(f=clips)
+    cv = sub.add_parser("clips-verknuepfen", help="vorhandene Clips in der Datenbank vermerken (nur lokal)")
+    cv.add_argument("--ziel", required=True, help="Clip-Ordner, z. B. D:\\DSRClips")
+    cv.add_argument("--vor", type=int, default=10, help="derselbe Wert wie bei clips")
+    cv.set_defaults(f=clips_verknuepfen)
+    un = sub.add_parser("uhrzeiten-nachtragen", help="Beginn der Videos (Uhrzeit) bei bestehenden Einträgen ergänzen")
+    un.set_defaults(f=uhrzeiten_nachtragen)
     ab = sub.add_parser("abdeckung", help="zeigen, welche Boss-Plätze schon in der Datenbank vorkommen")
     ab.add_argument("--namen", default=os.path.join(HIER, "namen.json"))
     ab.set_defaults(f=abdeckung)
