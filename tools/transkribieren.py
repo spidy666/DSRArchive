@@ -20,6 +20,21 @@ def srt_zeit(s):
     return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
 
 
+def audio_laden(pfad):
+    """Dekodiert die Datei mit ffmpeg zu 16-kHz-Mono-Daten. Das umgeht faster-whisper/PyAV: dessen eigene
+    Dekodierung scheitert mit neuen av-Versionen (open() got an unexpected keyword argument 'metadata_errors')."""
+    import subprocess
+    import numpy as np
+    try:
+        r = subprocess.run(["ffmpeg", "-v", "error", "-i", pfad, "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+                           capture_output=True)
+    except FileNotFoundError:
+        sys.exit("ffmpeg nicht gefunden (muss im PATH liegen).")
+    if r.returncode or not r.stdout:
+        sys.exit("ffmpeg konnte das Audio nicht lesen: " + r.stderr.decode("utf-8", "replace")[-500:])
+    return np.frombuffer(r.stdout, dtype=np.float32)
+
+
 def letzter_stand(pfad):
     """Nummer und Ende (s) des letzten vollständigen Eintrags einer vorhandenen .srt (0, 0.0 wenn keine)."""
     if not os.path.exists(pfad):
@@ -71,7 +86,9 @@ def main():
             with open(basis + ".txt", "w", encoding="utf-8") as f:
                 f.write("\n".join(zeilen) + "\n")
     optionen = {"clip_timestamps": [ab]} if ab > 0 else {}   # Zeiten bleiben die des ganzen Videos
-    segmente, info = modell.transcribe(a.datei, language=a.sprache, vad_filter=not a.ohne_vad,
+    print("Lese Audio ...", flush=True)
+    audio = audio_laden(a.datei)
+    segmente, info = modell.transcribe(audio, language=a.sprache, vad_filter=not a.ohne_vad,
                                        beam_size=5, condition_on_previous_text=False, **optionen)
     dauer = info.duration or 0
     t0 = time.time()
