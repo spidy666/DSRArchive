@@ -8,6 +8,11 @@ Abschnitte nach Datum geordnet, der neueste zuerst.
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+- `tools/transkribieren.py`: transkribiert ein Video lokal mit faster-whisper auf der CPU und schreibt
+  `.srt` und `.txt` (`--sprache`, `--modell`, `--ohne-vad`). `--fortsetzen` setzt ein abgebrochenes
+  Transkript am Stand der `.srt` fort. Das Audio wird über ffmpeg dekodiert.
+
 ## [2026-10-29]
 
 ### Hinzugefügt
