@@ -1062,6 +1062,41 @@ def clips_verknuepfen(a):
     print(f"{len(zeilen)} Kämpfe, {len(zeilen) - fehlt} mit Clip, {fehlt} ohne; {neu} Einträge geändert.")
 
 
+def uebersicht(a):
+    """Schreibt eine lokale Übersicht (index.html) in den Clip-Ordner: dieselbe Suche wie die öffentliche Seite,
+    dazu ein Link auf den Clip. Die Daten stehen in der Datei selbst, sie funktioniert ohne Netz und ohne Twitch.
+    Sie ist nur für den Rechner gedacht und gehört nicht ins Repository."""
+    vorlage = os.path.join(HIER, "docs", "index.html")
+    html = open(vorlage, encoding="utf-8").read()
+    db = db_lesen(a.db)
+    try:
+        zeilen = zeilen_aus_db(db, mit_clip=True)
+    finally:
+        db.close()
+    daten = json.dumps({"stand": datetime.now().strftime("%Y-%m-%d"), "kaempfe": zeilen}, ensure_ascii=False)
+    daten = daten.replace("</", "<\\/")   # kein vorzeitiges Ende des Script-Blocks
+    abruf = ('fetch("./kaempfe.json")\n    .then(function (response) {\n'
+             '      if (!response.ok) throw new Error("HTTP " + response.status);\n'
+             '      return response.json();\n    })')
+    if abruf not in html or html.count("function videoZelle") != 1:
+        sys.exit("docs/index.html hat eine unerwartete Form, die Übersicht kann nicht daraus gebaut werden.")
+    html = html.replace(abruf, "Promise.resolve(" + daten + ")")
+    # Clip-Link am Ende von videoZelle (vor dem Anhängen der Zelle an die Zeile)
+    i = html.index("function videoZelle")
+    j = html.index("    row.appendChild(cell);", i)
+    clip_js = ('    if (entry.clip) {\n      var clipLink = document.createElement("a");\n'
+               '      clipLink.href = entry.clip.split("/").map(encodeURIComponent).join("/");\n      clipLink.target = "_blank";\n'
+               '      clipLink.textContent = "Clip lokal";\n      cell.appendChild(document.createElement("br"));\n'
+               '      cell.appendChild(clipLink);\n    }\n')
+    html = html[:j] + clip_js + html[j:]
+    html = html.replace("<title>DSR-Archiv – Bosskämpfe durchsuchen</title>", "<title>DSR-Archiv (lokal)</title>")
+    html = html.replace("Das DSR-Archiv sammelt", "Lokale Übersicht mit Clips, nur für diesen Rechner. Das DSR-Archiv sammelt", 1)
+    out = a.out or os.path.join(a.ziel, "index.html")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"{len(zeilen)} Kämpfe, {sum(1 for z in zeilen if z.get('clip'))} mit Clip, nach {out} geschrieben.")
+
+
 def uhrzeiten_nachtragen(a):
     """Trägt bei Videos ohne Uhrzeit den Beginn des Videos nach (videos.stream_start, UTC), über yt-dlp."""
     db = db_oeffnen(a.db)
@@ -1285,6 +1320,10 @@ def main():
     cv.add_argument("--ziel", required=True, help="Clip-Ordner, z. B. D:\\DSRClips")
     cv.add_argument("--vor", type=int, default=10, help="derselbe Wert wie bei clips")
     cv.set_defaults(f=clips_verknuepfen)
+    ue = sub.add_parser("uebersicht", help="lokale Übersicht mit Clip-Links als index.html im Clip-Ordner schreiben")
+    ue.add_argument("--ziel", required=True, help="Clip-Ordner, z. B. D:\\DSRClips")
+    ue.add_argument("--out", help="andere Ausgabedatei (Links auf Clips sind relativ zu dieser Datei)")
+    ue.set_defaults(f=uebersicht)
     un = sub.add_parser("uhrzeiten-nachtragen", help="Beginn der Videos (Uhrzeit) bei bestehenden Einträgen ergänzen")
     un.set_defaults(f=uhrzeiten_nachtragen)
     ab = sub.add_parser("abdeckung", help="zeigen, welche Boss-Plätze schon in der Datenbank vorkommen")

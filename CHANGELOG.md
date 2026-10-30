@@ -14,7 +14,9 @@ Abschnitte nach Datum geordnet, der neueste zuerst.
   die Suchseite zeigt Datum und Uhrzeit in der Ortszeit des Besuchers, `suche` in der Zeitzone des Rechners.
 - Clip-Verknüpfung: neue Spalte `kaempfe.clip` und Befehl `clips-verknuepfen`. Der Pfad bleibt lokal
   (`suche` zeigt ihn), er steht nicht im Export und nicht auf der öffentlichen Seite.
-- Tests für Zeitstempel, Spaltenmigration, Export ohne Clip-Pfad und Clip-Verknüpfung.
+- `uebersicht`: schreibt eine lokale `index.html` in den Clip-Ordner (Suche wie auf der öffentlichen Seite,
+  dazu ein Link „Clip lokal"). Die Daten stehen in der Datei, sie braucht weder Netz noch Twitch.
+- Tests für Zeitstempel, Spaltenmigration, Export ohne Clip-Pfad und Clip-Verknüpfung und Übersicht.
 - `tools/transkribieren.py`: transkribiert ein Video lokal mit faster-whisper auf der CPU und schreibt
   `.srt` und `.txt` (`--sprache`, `--modell`, `--ohne-vad`). `--fortsetzen` setzt ein abgebrochenes
   Transkript am Stand der `.srt` fort. Das Audio wird über ffmpeg dekodiert.

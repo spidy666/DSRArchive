@@ -381,6 +381,22 @@ class UhrzeitUndClipVerknuepfung(unittest.TestCase):
             self.assertIsNone(db.execute("SELECT clip FROM kaempfe").fetchone()[0])
             db.close()
 
+    def test_uebersicht_enthaelt_clip_und_daten_ohne_abruf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._db_mit_kampf(tmp)
+            ziel = Path(tmp) / "clips"
+            datei = Path(dsrarchive.clip_pfad(str(ziel), "Streamer", "Boss", "42", 125, 10))
+            datei.parent.mkdir(parents=True)
+            datei.write_bytes(b"x")
+            with contextlib.redirect_stdout(io.StringIO()):
+                dsrarchive.clips_verknuepfen(type("A", (), {"db": db_path, "ziel": str(ziel), "vor": 10})())
+                dsrarchive.uebersicht(type("A", (), {"db": db_path, "ziel": str(ziel), "out": None})())
+            html = (ziel / "index.html").read_text(encoding="utf-8")
+            self.assertNotIn('fetch("./kaempfe.json")', html)
+            self.assertIn('"clip": "Streamer/Boss/Streamer - Boss - 42 - 0-01-55.mp4"', html)
+            self.assertIn("Clip lokal", html)
+            self.assertIn("DSR-Archiv (lokal)", html)
+
 
 if __name__ == "__main__":
     unittest.main()
